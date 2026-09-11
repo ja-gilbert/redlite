@@ -107,6 +107,66 @@ class Server(object):
         self._protocol = ProtocolHandler()
         self._kv = {}
 
+        self._commands = self.get_commands()
+
+    def get_commands(self):
+        return {
+            b'GET': self.get,
+            b'SET': self.set,
+            b'DELETE': self.delete,
+            b'FLUSH': self.flush,
+            b'MGET': self.mget,
+            b'MSET': self.mset,
+        }
+
+    def get_response(self, data):
+        if not isinstance(data, list):
+            try:
+                data = data.split()
+            except AttributeError:
+                raise CommandError('Request must be a list or a simple string.')
+
+        if not data:
+            raise CommandError('Missing command')
+
+        command = data[0].upper()
+        if command not in self._commands:
+            raise CommandError('Unrecognized command: %s'
+                               % command.decode('utf-8', 'replace'))
+
+        try:
+            return self._commands[command](*data[1:])
+        except TypeError:
+            raise CommandError('Wrong number of arguments for %s'
+                               % command.decode('utf-8', 'replace'))
+
+    def get(self, key):
+        return self._kv.get(key)
+
+    def set(self, key, value):
+        self._kv[key] = value
+        return 1
+
+    def delete(self, key):
+        if key in self._kv:
+            del self._kv[key]
+            return 1
+        return 0
+
+    def flush(self):
+        kvlen = len(self._kv)
+        self._kv.clear()
+        return kvlen
+
+    def mget(self, *keys):
+        return [self._kv.get(key) for key in keys]
+
+    def mset(self, *items):
+        data = list(zip(items[::2], items[1::2]))
+        for key, value in data:
+            self._kv[key] = value
+        return len(data)
+
     def connection_handler(self, conn, address):
         # Convert "conn" (a socket object) into a file-like object.
         socket_file = conn.makefile('rwb')
@@ -124,11 +184,6 @@ class Server(object):
                 resp = Error(exc.args[0])
 
             self._protocol.write_response(socket_file, resp)
-
-    def get_response(self, data):
-        # Here we'll actually unpack the data sent by the client, execute the
-        # command they specified, and pass back the return value.
-        pass
 
     def run(self):
         self._server.serve_forever()
