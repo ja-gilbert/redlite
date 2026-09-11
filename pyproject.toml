@@ -5,3 +5,11 @@ requires-python = ">=3.12"
 dependencies = [
     "gevent>=26.8.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.7",
+]
+
+[tool.ruff.format]
+line-ending = "lf"
