@@ -9,7 +9,7 @@ error rather than crashing the connection.
 import pytest
 
 from redlite import CommandError, Server
-from redlite.protocol import OK
+from redlite.protocol import OK, PONG
 
 
 @pytest.fixture
@@ -91,3 +91,16 @@ def test_mset_with_odd_argument_count_is_an_error(server):
     with pytest.raises(CommandError):
         run(server, b"MSET", b"a", b"1", b"b")
     assert run(server, b"GET", b"a") is None  # nothing was stored
+
+
+@pytest.mark.parametrize(
+    "argv, reply",
+    [
+        ([b"PING"], PONG),
+        ([b"ECHO", b"hello"], b"hello"),
+        ([b"COMMAND", b"DOCS"], []),  # redis-cli sends this on connect
+        ([b"COMMAND"], []),  # older clients send it bare
+    ],
+)
+def test_handshake_commands_reply_as_redis_close(server, argv, reply):
+    assert run(server, *argv) == reply

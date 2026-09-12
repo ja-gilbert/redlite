@@ -3,7 +3,7 @@
 from gevent.pool import Pool
 from gevent.server import StreamServer
 
-from .protocol import OK, CommandError, Disconnect, Error, ProtocolHandler
+from .protocol import OK, PONG, CommandError, Disconnect, Error, ProtocolHandler
 
 
 class Server:
@@ -20,6 +20,9 @@ class Server:
 
     def get_commands(self):
         return {
+            "PING": self.ping,
+            "ECHO": self.echo,
+            "COMMAND": self.command,
             "GET": self.get,
             "SET": self.set,
             "DEL": self.delete,
@@ -53,6 +56,17 @@ class Server:
             return self._commands[command](*data[1:])
         except TypeError:
             raise CommandError(f"Wrong number of arguments for {command}")
+
+    def ping(self):
+        return PONG
+
+    def echo(self, message):
+        return message
+
+    def command(self, *args):
+        # Real Redis would describe every command here. Clients only need an
+        # array to proceed, so an empty one keeps redis-cli's handshake quiet
+        return []
 
     def get(self, key):
         return self._kv.get(key)

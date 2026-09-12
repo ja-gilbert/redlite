@@ -16,6 +16,7 @@ class Disconnect(Exception):
 Error = namedtuple("Error", ("message",))
 SimpleString = namedtuple("SimpleString", ("value",))
 OK = SimpleString(b"OK")
+PONG = SimpleString(b"PONG")
 
 
 class ProtocolHandler:
