@@ -11,7 +11,7 @@ from io import BytesIO
 
 import pytest
 
-from redlite import CommandError, Disconnect, Error, ProtocolHandler
+from redlite import Disconnect, Error, ProtocolHandler
 from redlite.protocol import OK
 
 
@@ -80,6 +80,8 @@ def test_empty_read_raises_disconnect(proto):
         parse(proto, b"")
 
 
-def test_unknown_type_byte_raises_command_error(proto):
-    with pytest.raises(CommandError):
-        parse(proto, b"@nope\r\n")
+def test_non_resp_line_is_parsed_as_inline_command(proto):
+    # Anything not starting with a RESP type byte is a plain text command
+    # line split on whitespace: what telnet and redis-benchmark send.
+    assert parse(proto, b"SET foo bar\r\n") == [b"SET", b"foo", b"bar"]
+    assert parse(proto, b"PING\r\n") == [b"PING"]

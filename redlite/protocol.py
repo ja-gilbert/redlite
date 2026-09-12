@@ -37,8 +37,10 @@ class ProtocolHandler:
         try:
             handler = self.handlers[first_byte]
         except KeyError:
-            socket_file.readline()  # discard the rest of the malformed line
-            raise CommandError("Bad request")
+            # Not a RESP type byte, so this is an inline command: a plain text
+            # line like b"SET some data\r\n", as sent by telnet or redis-benchmark.
+            line = first_byte + socket_file.readline()
+            return line.split()
         return handler(socket_file)
 
     def handle_simple_string(self, socket_file):
