@@ -46,10 +46,11 @@ class ProtocolHandler:
             raise Disconnect()
 
         try:
-            # Delegate to the appropriate handler based on the first byte
-            return self.handlers[first_byte](socket_file)
+            handler = self.handlers[first_byte]
         except KeyError:
+            socket_file.readline()  # discard the rest of the malformed line
             raise CommandError("Bad request")
+        return handler(socket_file)
 
     def handle_simple_string(self, socket_file):
         return socket_file.readline().rstrip(b"\r\n")
@@ -181,6 +182,8 @@ class Server:
         return [self._kv.get(key) for key in keys]
 
     def mset(self, *items):
+        if len(items) % 2 != 0:
+            raise CommandError("wrong number of arguments for MSET")
         data = list(zip(items[::2], items[1::2]))
         for key, value in data:
             self._kv[key] = value
@@ -196,6 +199,9 @@ class Server:
                 data = self._protocol.handle_request(socket_file)
             except Disconnect:
                 break
+            except CommandError as exc:
+                self._protocol.write_response(socket_file, Error(exc.args[0]))
+                continue
 
             try:
                 resp = self.get_response(data)
@@ -203,6 +209,16 @@ class Server:
                 resp = Error(exc.args[0])
 
             self._protocol.write_response(socket_file, resp)
+
+    def start(self):
+        self._server.start()
+
+    def stop(self):
+        self._server.stop()
+
+    @property
+    def port(self):
+        return self._server.server_port
 
     def run(self):
         self._server.serve_forever()
