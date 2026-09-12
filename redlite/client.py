@@ -30,8 +30,8 @@ class Client:
     def set(self, key, value):
         return self.execute("SET", key, value)
 
-    def delete(self, key):
-        return self.execute("DELETE", key)
+    def delete(self, *keys):
+        return self.execute("DEL", *keys)
 
     def flush(self):
         return self.execute("FLUSH")

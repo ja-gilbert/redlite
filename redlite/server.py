@@ -22,7 +22,7 @@ class Server:
         return {
             "GET": self.get,
             "SET": self.set,
-            "DELETE": self.delete,
+            "DEL": self.delete,
             "FLUSH": self.flush,
             "MGET": self.mget,
             "MSET": self.mset,
@@ -60,11 +60,15 @@ class Server:
         self._kv[key] = value
         return 1
 
-    def delete(self, key):
-        if key in self._kv:
-            del self._kv[key]
-            return 1
-        return 0
+    def delete(self, *keys):
+        if not keys:
+            raise CommandError("wrong number of arguments for DEL")
+        removed = 0
+        for key in keys:
+            if key in self._kv:
+                del self._kv[key]
+                removed += 1
+        return removed
 
     def flush(self):
         kvlen = len(self._kv)
