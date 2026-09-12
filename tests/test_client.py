@@ -92,3 +92,17 @@ def test_quit_replies_ok_then_server_closes(server_port):
     assert fh.readline() == b"+OK\r\n"
     assert fh.readline() == b""  # EOF: server hung up, not us
     sock.close()
+
+
+def test_close_releases_connection(server_port):
+    c = Client(port=server_port)
+    c.close()
+    with pytest.raises((OSError, ValueError)):
+        c.get("k")  # the socket is really gone, not just flagged
+
+
+def test_client_works_as_context_manager(server_port):
+    with Client(port=server_port) as c:
+        assert c.set("k", "v") == b"OK"
+    with pytest.raises((OSError, ValueError)):
+        c.get("k")  # closed on leaving the block

@@ -24,6 +24,16 @@ class Client:
         self._fh = self._socket.makefile("rwb")
         self._decode_responses = decode_responses
 
+    def close(self):
+        self._fh.close()
+        self._socket.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
+
     def get(self, key):
         return self.execute("GET", key)
 
