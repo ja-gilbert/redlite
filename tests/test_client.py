@@ -14,7 +14,7 @@ from redlite import Client, CommandError
 
 
 def test_set_and_get_round_trip_over_a_socket(client):
-    assert client.set("k", "v") == 1
+    assert client.set("k", "v") == b"OK"
     assert client.get("k") == b"v"
 
 
@@ -66,5 +66,5 @@ def test_malformed_request_gets_an_error_and_keeps_the_connection(server_port):
     # Connection still usable: a well-formed command must still work.
     fh.write(b"*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n")
     fh.flush()
-    assert fh.readline() == b":1\r\n"  # SET replies :1 today (+OK comes in Gate 1a)
+    assert fh.readline() == b"+OK\r\n"  # SET replies :1 today (+OK comes in Gate 1a)
     sock.close()

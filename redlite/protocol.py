@@ -14,6 +14,8 @@ class Disconnect(Exception):
 
 
 Error = namedtuple("Error", ("message",))
+SimpleString = namedtuple("SimpleString", ("value",))
+OK = SimpleString(b"OK")
 
 
 class ProtocolHandler:
@@ -85,6 +87,8 @@ class ProtocolHandler:
             if isinstance(message, str):
                 message = message.encode("utf-8")
             buf.write(b"-%s\r\n" % message)
+        elif isinstance(data, SimpleString):
+            buf.write(b"+%s\r\n" % data.value)
         elif isinstance(data, (list, tuple)):
             buf.write(b"*%d\r\n" % len(data))
             for item in data:

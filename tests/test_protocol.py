@@ -12,6 +12,7 @@ from io import BytesIO
 import pytest
 
 from redlite import CommandError, Disconnect, Error, ProtocolHandler
+from redlite.protocol import OK
 
 
 @pytest.fixture
@@ -65,6 +66,13 @@ def test_error_is_not_serialized_as_array(proto):
     # as a RESP error (-...) and not fall into the list/tuple branch.
     assert serialize(proto, Error(b"boom")) == b"-boom\r\n"
     assert parse(proto, b"-boom\r\n") == Error(b"boom")
+
+
+def test_simple_string_serializes_with_plus_not_as_array(proto):
+    # SimpleString is a namedtuple, so it *is* a tuple -- same trap as Error.
+    # +OK is a status; $2\r\nOK is a value. redis-cli shows them differently.
+    assert serialize(proto, OK) == b"+OK\r\n"
+    assert parse(proto, b"+OK\r\n") == b"OK"
 
 
 def test_empty_read_raises_disconnect(proto):

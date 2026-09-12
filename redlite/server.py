@@ -3,7 +3,7 @@
 from gevent.pool import Pool
 from gevent.server import StreamServer
 
-from .protocol import CommandError, Disconnect, Error, ProtocolHandler
+from .protocol import OK, CommandError, Disconnect, Error, ProtocolHandler
 
 
 class Server:
@@ -59,7 +59,7 @@ class Server:
 
     def set(self, key, value):
         self._kv[key] = value
-        return 1
+        return OK
 
     def delete(self, *keys):
         if not keys:
@@ -72,9 +72,8 @@ class Server:
         return removed
 
     def flush(self):
-        kvlen = len(self._kv)
         self._kv.clear()
-        return kvlen
+        return OK
 
     def mget(self, *keys):
         return [self._kv.get(key) for key in keys]
@@ -85,7 +84,7 @@ class Server:
         data = list(zip(items[::2], items[1::2]))
         for key, value in data:
             self._kv[key] = value
-        return len(data)
+        return OK
 
     def connection_handler(self, conn, address):
         # Convert "conn" (a socket object) into a file-like object.

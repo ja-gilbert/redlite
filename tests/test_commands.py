@@ -9,6 +9,7 @@ error rather than crashing the connection.
 import pytest
 
 from redlite import CommandError, Server
+from redlite.protocol import OK
 
 
 @pytest.fixture
@@ -56,14 +57,14 @@ def test_mget_returns_none_for_missing_keys_in_place(server):
 
 def test_flushdb_empties_the_store_and_returns_count(server):
     run(server, b"MSET", b"a", b"1", b"b", b"2")
-    assert run(server, b"FLUSHDB") == 2
+    assert run(server, b"FLUSHDB") == OK
     assert run(server, b"GET", b"a") is None
 
 
 def test_flushall_is_alias_for_flushdb(server):
     # Redis has both; with a single database they do the same thing.
     run(server, b"SET", b"k", b"v")
-    assert run(server, b"FLUSHALL") == 1
+    assert run(server, b"FLUSHALL") == OK
     assert run(server, b"GET", b"k") is None
 
 
