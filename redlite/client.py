@@ -34,7 +34,7 @@ class Client:
         return self.execute("DEL", *keys)
 
     def flush(self):
-        return self.execute("FLUSH")
+        return self.execute("FLUSHDB")
 
     def mget(self, *keys):
         return self.execute("MGET", *keys)

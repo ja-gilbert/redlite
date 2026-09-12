@@ -23,7 +23,8 @@ class Server:
             "GET": self.get,
             "SET": self.set,
             "DEL": self.delete,
-            "FLUSH": self.flush,
+            "FLUSHDB": self.flush,
+            "FLUSHALL": self.flush,
             "MGET": self.mget,
             "MSET": self.mset,
         }
