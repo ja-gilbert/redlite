@@ -12,7 +12,7 @@ not yet the state - see the roadmap.
 
 Start the server:
     
-    uv run python redlite.py
+    uv run redlite
 
 Then, in another terminal:
 
