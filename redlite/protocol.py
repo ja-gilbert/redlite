@@ -10,10 +10,17 @@ class CommandError(Exception):
 
 
 class Disconnect(Exception):
-    pass
+    """End the connection. If `reply` is given, send that first"""
+
+    def __init__(self, reply=None):
+        super().__init__()
+        self.reply = reply
 
 
 Error = namedtuple("Error", ("message",))
+SimpleString = namedtuple("SimpleString", ("value",))
+OK = SimpleString(b"OK")
+PONG = SimpleString(b"PONG")
 
 
 class ProtocolHandler:
@@ -35,8 +42,10 @@ class ProtocolHandler:
         try:
             handler = self.handlers[first_byte]
         except KeyError:
-            socket_file.readline()  # discard the rest of the malformed line
-            raise CommandError("Bad request")
+            # Not a RESP type byte, so this is an inline command: a plain text
+            # line like b"SET some data\r\n", as sent by telnet or redis-benchmark.
+            line = first_byte + socket_file.readline()
+            return line.split()
         return handler(socket_file)
 
     def handle_simple_string(self, socket_file):
@@ -85,6 +94,8 @@ class ProtocolHandler:
             if isinstance(message, str):
                 message = message.encode("utf-8")
             buf.write(b"-%s\r\n" % message)
+        elif isinstance(data, SimpleString):
+            buf.write(b"+%s\r\n" % data.value)
         elif isinstance(data, (list, tuple)):
             buf.write(b"*%d\r\n" % len(data))
             for item in data:

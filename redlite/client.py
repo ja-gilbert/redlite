@@ -24,17 +24,27 @@ class Client:
         self._fh = self._socket.makefile("rwb")
         self._decode_responses = decode_responses
 
+    def close(self):
+        self._fh.close()
+        self._socket.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
+
     def get(self, key):
         return self.execute("GET", key)
 
     def set(self, key, value):
         return self.execute("SET", key, value)
 
-    def delete(self, key):
-        return self.execute("DELETE", key)
+    def delete(self, *keys):
+        return self.execute("DEL", *keys)
 
     def flush(self):
-        return self.execute("FLUSH")
+        return self.execute("FLUSHDB")
 
     def mget(self, *keys):
         return self.execute("MGET", *keys)

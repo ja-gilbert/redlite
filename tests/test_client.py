@@ -14,7 +14,7 @@ from redlite import Client, CommandError
 
 
 def test_set_and_get_round_trip_over_a_socket(client):
-    assert client.set("k", "v") == 1
+    assert client.set("k", "v") == b"OK"
     assert client.get("k") == b"v"
 
 
@@ -49,22 +49,60 @@ def test_error_reply_becomes_a_raised_exception(client):
         client.execute("BOGUS")
 
 
-def test_malformed_request_gets_an_error_and_keeps_the_connection(server_port):
-    # Bug: an unparseable first byte (e.g. an inline "PING\r\n" from telnet)
-    # makes handle_request raise, which connection_handler doesn't catch --
-    # the greenlet dies and the connection drops with no reply. The server
-    # should answer with an error and stay open for the next command.
+def test_inline_command_over_a_raw_socket(server_port):
+    # The plain-text form: no RESP framing, just words and a newline.
     sock = socket.create_connection(("127.0.0.1", server_port), timeout=3)
     sock.settimeout(3)
     fh = sock.makefile("rwb")
 
-    fh.write(b"PING\r\n")  # inline text, not a RESP array
+    fh.write(b"SET k v\r\n")
+    fh.flush()
+    assert fh.readline() == b"+OK\r\n"
+
+    fh.write(b"GET k\r\n")
+    fh.flush()
+    assert fh.readline() == b"$1\r\n"
+    assert fh.readline() == b"v\r\n"
+    sock.close()
+
+
+def test_unknown_inline_command_gets_an_error_and_keeps_the_connection(server_port):
+    sock = socket.create_connection(("127.0.0.1", server_port), timeout=3)
+    sock.settimeout(3)
+    fh = sock.makefile("rwb")
+
+    fh.write(b"BOGUS\r\n")
     fh.flush()
     reply = fh.readline()
     assert reply.startswith(b"-"), f"expected an error reply, got {reply!r}"
 
-    # Connection still usable: a well-formed command must still work.
-    fh.write(b"*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n")
+    fh.write(b"SET k v\r\n")  # connection must still be usable
     fh.flush()
-    assert fh.readline() == b":1\r\n"  # SET replies :1 today (+OK comes in Gate 1a)
+    assert fh.readline() == b"+OK\r\n"
     sock.close()
+
+
+def test_quit_replies_ok_then_server_closes(server_port):
+    sock = socket.create_connection(("127.0.0.1", server_port), timeout=3)
+    sock.settimeout(3)
+    fh = sock.makefile("rwb")
+
+    fh.write(b"QUIT\r\n")
+    fh.flush()
+    assert fh.readline() == b"+OK\r\n"
+    assert fh.readline() == b""  # EOF: server hung up, not us
+    sock.close()
+
+
+def test_close_releases_connection(server_port):
+    c = Client(port=server_port)
+    c.close()
+    with pytest.raises((OSError, ValueError)):
+        c.get("k")  # the socket is really gone, not just flagged
+
+
+def test_client_works_as_context_manager(server_port):
+    with Client(port=server_port) as c:
+        assert c.set("k", "v") == b"OK"
+    with pytest.raises((OSError, ValueError)):
+        c.get("k")  # closed on leaving the block

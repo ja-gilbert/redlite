@@ -69,7 +69,8 @@ def client(server_port):
     """A client that returns raw bytes. Flushed so each test starts empty."""
     c = Client(port=server_port)
     c.flush()
-    return c
+    yield c
+    c.close()
 
 
 @pytest.fixture
@@ -77,4 +78,5 @@ def client_decoded(server_port):
     """A client with decode_responses=True. Flushed before each test."""
     c = Client(port=server_port, decode_responses=True)
     c.flush()
-    return c
+    yield c
+    c.close()

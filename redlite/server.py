@@ -3,7 +3,7 @@
 from gevent.pool import Pool
 from gevent.server import StreamServer
 
-from .protocol import CommandError, Disconnect, Error, ProtocolHandler
+from .protocol import OK, PONG, CommandError, Disconnect, Error, ProtocolHandler
 
 
 class Server:
@@ -20,12 +20,17 @@ class Server:
 
     def get_commands(self):
         return {
+            "PING": self.ping,
+            "ECHO": self.echo,
+            "COMMAND": self.command,
             "GET": self.get,
             "SET": self.set,
-            "DELETE": self.delete,
-            "FLUSH": self.flush,
+            "DEL": self.delete,
+            "FLUSHDB": self.flush,
+            "FLUSHALL": self.flush,
             "MGET": self.mget,
             "MSET": self.mset,
+            "QUIT": self.quit,
         }
 
     def get_response(self, data):
@@ -53,23 +58,40 @@ class Server:
         except TypeError:
             raise CommandError(f"Wrong number of arguments for {command}")
 
+    def ping(self):
+        return PONG
+
+    def echo(self, message):
+        return message
+
+    def command(self, *args):
+        # Real Redis would describe every command here. Clients only need an
+        # array to proceed, so an empty one keeps redis-cli's handshake quiet
+        return []
+
+    def quit(self):
+        raise Disconnect(reply=OK)
+
     def get(self, key):
         return self._kv.get(key)
 
     def set(self, key, value):
         self._kv[key] = value
-        return 1
+        return OK
 
-    def delete(self, key):
-        if key in self._kv:
-            del self._kv[key]
-            return 1
-        return 0
+    def delete(self, *keys):
+        if not keys:
+            raise CommandError("wrong number of arguments for DEL")
+        removed = 0
+        for key in keys:
+            if key in self._kv:
+                del self._kv[key]
+                removed += 1
+        return removed
 
     def flush(self):
-        kvlen = len(self._kv)
         self._kv.clear()
-        return kvlen
+        return OK
 
     def mget(self, *keys):
         return [self._kv.get(key) for key in keys]
@@ -80,7 +102,7 @@ class Server:
         data = list(zip(items[::2], items[1::2]))
         for key, value in data:
             self._kv[key] = value
-        return len(data)
+        return OK
 
     def connection_handler(self, conn, address):
         # Convert "conn" (a socket object) into a file-like object.
@@ -90,14 +112,11 @@ class Server:
         while True:
             try:
                 data = self._protocol.handle_request(socket_file)
-            except Disconnect:
-                break
-            except CommandError as exc:
-                self._protocol.write_response(socket_file, Error(exc.args[0]))
-                continue
-
-            try:
                 resp = self.get_response(data)
+            except Disconnect as exc:
+                if exc.reply is not None:
+                    self._protocol.write_response(socket_file, exc.reply)
+                break
             except CommandError as exc:
                 resp = Error(exc.args[0])
 
