@@ -30,6 +30,7 @@ class Server:
             "FLUSHALL": self.flush,
             "MGET": self.mget,
             "MSET": self.mset,
+            "QUIT": self.quit,
         }
 
     def get_response(self, data):
@@ -67,6 +68,9 @@ class Server:
         # Real Redis would describe every command here. Clients only need an
         # array to proceed, so an empty one keeps redis-cli's handshake quiet
         return []
+
+    def quit(self):
+        raise Disconnect(reply=OK)
 
     def get(self, key):
         return self._kv.get(key)
@@ -108,14 +112,11 @@ class Server:
         while True:
             try:
                 data = self._protocol.handle_request(socket_file)
-            except Disconnect:
-                break
-            except CommandError as exc:
-                self._protocol.write_response(socket_file, Error(exc.args[0]))
-                continue
-
-            try:
                 resp = self.get_response(data)
+            except Disconnect as exc:
+                if exc.reply is not None:
+                    self._protocol.write_response(socket_file, exc.reply)
+                break
             except CommandError as exc:
                 resp = Error(exc.args[0])
 

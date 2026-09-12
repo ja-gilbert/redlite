@@ -8,7 +8,7 @@ error rather than crashing the connection.
 
 import pytest
 
-from redlite import CommandError, Server
+from redlite import CommandError, Disconnect, Server
 from redlite.protocol import OK, PONG
 
 
@@ -104,3 +104,9 @@ def test_mset_with_odd_argument_count_is_an_error(server):
 )
 def test_handshake_commands_reply_as_redis_close(server, argv, reply):
     assert run(server, *argv) == reply
+
+
+def test_quit_disconnects_with_ok_reply(server):
+    with pytest.raises(Disconnect) as info:
+        run(server, b"QUIT")
+    assert info.value.reply == OK

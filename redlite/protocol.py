@@ -10,7 +10,11 @@ class CommandError(Exception):
 
 
 class Disconnect(Exception):
-    pass
+    """End the connection. If `reply` is given, send that first"""
+
+    def __init__(self, reply=None):
+        super().__init__()
+        self.reply = reply
 
 
 Error = namedtuple("Error", ("message",))

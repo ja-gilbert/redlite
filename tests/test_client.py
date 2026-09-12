@@ -80,3 +80,15 @@ def test_unknown_inline_command_gets_an_error_and_keeps_the_connection(server_po
     fh.flush()
     assert fh.readline() == b"+OK\r\n"
     sock.close()
+
+
+def test_quit_replies_ok_then_server_closes(server_port):
+    sock = socket.create_connection(("127.0.0.1", server_port), timeout=3)
+    sock.settimeout(3)
+    fh = sock.makefile("rwb")
+
+    fh.write(b"QUIT\r\n")
+    fh.flush()
+    assert fh.readline() == b"+OK\r\n"
+    assert fh.readline() == b""  # EOF: server hung up, not us
+    sock.close()
