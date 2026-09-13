@@ -186,3 +186,12 @@ def test_getdel_returns_Value_and_removes_key(server):
     assert run(server, b"GETDEL", b"k") == b"v"
     assert run(server, b"GET", b"k") is None
     assert run(server, b"GETDEL", b"k") is None  # already gone
+
+def test_string_commands_on_non_string_are_wrongtype(server):
+    # Python client can store an int or a list; REDIS calls this WRONGTYPE.
+    # Without this, len() blows up into arity guard and lied about the cause.
+    run(server, b"SET", b"n", 5)
+    with pytest.raises(CommandError, match=r"^WRONGTYPE"):
+        run(server, b"STRLEN", b"n")
+    with pytest.raises(CommandError, match=r"^WRONGTYPE"):
+        run(server, b"APPEND", b"n", b"x")
