@@ -121,3 +121,30 @@ def test_error_follows_redis_conventions(server):
         CommandError, match=r"^ERR wrong number of arguments for 'get' command$"
     ):
         run(server, b"GET")
+
+
+def test_incr_starts_from_zero_and_stores_string(server):
+    assert run(server, b"INCR", b"hits") == 1
+    assert run(server, b"INCR", b"hits") == 2
+    assert run(server, b"GET", b"hits") == b"2"  # normal string value, not special type
+
+
+def test_counter_family_shares_one_key(server):
+    run(server, b"SET", b"n", b"10")
+    assert run(server, b"INCRBY", b"n", b"5") == 15
+    assert run(server, b"DECR", b"n") == 14
+    assert run(server, b"DECRBY", b"n", b"4") == 10
+    assert run(server, b"INCRBY", b"n", b"-10") == 0
+
+
+def test_non_int_val_or_amount_is_error_and_leaves_store_alone(server):
+    run(server, b"SET", b"word", b"hello")
+    with pytest.raises(
+        CommandError, match=r"^ERR value is not an integer or out of range$"
+    ):
+        run(server, b"INCR", b"word")
+    with pytest.raises(
+        CommandError, match=r"^ERR value is not an integer or out of range$"
+    ):
+        run(server, b"INCRBY", b"word", b"abc")
+    assert run(server, b"GET", b"word") == b"hello"
