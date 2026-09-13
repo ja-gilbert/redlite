@@ -110,3 +110,14 @@ def test_quit_disconnects_with_ok_reply(server):
     with pytest.raises(Disconnect) as info:
         run(server, b"QUIT")
     assert info.value.reply == OK
+
+
+def test_error_follows_redis_conventions(server):
+    # The first word is an error code clients switch on; the wording is
+    # what you grep for. Both need to match real Redis outputs
+    with pytest.raises(CommandError, match=r"^ERR unknown command 'BOGUS'$"):
+        run(server, b"BOGUS")
+    with pytest.raises(
+        CommandError, match=r"^ERR wrong number of arguments for 'get' command$"
+    ):
+        run(server, b"GET")
