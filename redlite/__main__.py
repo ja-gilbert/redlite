@@ -10,7 +10,7 @@ monkey.patch_all()
 from redlite.server import Server
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         prog="redlite", description="A small Redis-style key-value server."
     )
@@ -30,5 +30,6 @@ def main():
     )
     Server(host=args.host, port=args.port).run()
 
-    if __name__ == "__main__":
-        main()
+
+if __name__ == "__main__":
+    main()

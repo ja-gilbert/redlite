@@ -6,6 +6,7 @@ lives here and starts one real gevent server in a subprocess (the same way
 the server actually runs, monkey-patched), on an OS-assigned port.
 """
 
+import re
 import socket
 import subprocess
 import sys
@@ -15,18 +16,11 @@ import pytest
 
 from redlite import Client
 
-# Run the server exactly as production does: patch first, then serve.
-# port=0 lets the OS pick a free port; we print it so the fixture can read it.
-_SERVER_SRC = (
-    "from gevent import monkey; monkey.patch_all()\n"
-    "import gevent\n"
-    "from redlite import Server\n"
-    "s = Server(port=0)\n"
-    "s.start()\n"
-    "print(s.port, flush=True)\n"
-    "while True:\n"
-    "    gevent.sleep(3600)\n"
-)
+# Start the server the way a user does -- through the real entry point -- so
+# the tests also cover __main__ and argparse. port=0 lets the OS pick a free
+# port; the server logs which one it got, and the fixture reads it back.
+_SERVER_CMD = [sys.executable, "-m", "redlite", "--port", "0"]
+_LISTENING = re.compile(r"listening on 127\.0\.0\.1:(\d+)")
 
 
 def _wait_until_accepting(port, timeout=5.0):
@@ -44,16 +38,22 @@ def _wait_until_accepting(port, timeout=5.0):
 def server_port():
     """A live redlite server in a subprocess. Yields its port."""
     proc = subprocess.Popen(
-        [sys.executable, "-c", _SERVER_SRC],
+        _SERVER_CMD,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
     try:
-        line = proc.stdout.readline()
-        if not line:
-            raise RuntimeError("server exited on startup:\n" + proc.stderr.read())
-        port = int(line.strip())
+        line = proc.stderr.readline()  # logging goes to stderr
+        match = _LISTENING.search(line)
+        if not match:
+            proc.terminate()
+            raise RuntimeError(
+                "server did not announce a port; output was:\n"
+                + line
+                + proc.stderr.read()
+            )
+        port = int(match.group(1))
         _wait_until_accepting(port)
         yield port
     finally:
