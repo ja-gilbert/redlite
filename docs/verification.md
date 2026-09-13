@@ -64,4 +64,3 @@ redlite is RESP2, so clients must pass `protocol=2`.
 - `COMMAND` returns an empty array: enough for clients to connect, but no
   command metadata.
 - `CONFIG`, `INFO`, `SELECT` are not implemented.
-- Error text does not yet follow Redis's `-ERR ...` conventions.

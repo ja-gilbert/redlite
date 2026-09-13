@@ -6,6 +6,12 @@ from gevent.server import StreamServer
 from .protocol import OK, PONG, CommandError, Disconnect, Error, ProtocolHandler
 
 
+def _wrong_args(command):
+    return CommandError(
+        f"ERR wrong number of arguments for '{command.lower()}' command"
+    )
+
+
 class Server:
     def __init__(self, host="127.0.0.1", port=31337, max_clients=64):
         self._pool = Pool(max_clients)
@@ -38,25 +44,25 @@ class Server:
             try:
                 data = data.split()
             except AttributeError:
-                raise CommandError("Request must be a list or a simple string.")
+                raise CommandError("ERR request must be a list or a simple string")
 
         if not data:
-            raise CommandError("Missing command")
+            raise CommandError("ERR missing command")
 
         command = data[0]
         if isinstance(command, bytes):
             command = command.decode("utf-8", "replace")
         if not isinstance(command, str):
-            raise CommandError("Command name must be a string")
+            raise CommandError("ERR command name must be a string")
         command = command.upper()
 
         if command not in self._commands:
-            raise CommandError(f"Unrecognized command: {command}")
+            raise CommandError(f"ERR unknown command '{command}'")
 
         try:
             return self._commands[command](*data[1:])
         except TypeError:
-            raise CommandError(f"Wrong number of arguments for {command}")
+            raise _wrong_args(command)
 
     def ping(self):
         return PONG
@@ -81,7 +87,7 @@ class Server:
 
     def delete(self, *keys):
         if not keys:
-            raise CommandError("wrong number of arguments for DEL")
+            raise _wrong_args("DEL")
         removed = 0
         for key in keys:
             if key in self._kv:
@@ -98,7 +104,7 @@ class Server:
 
     def mset(self, *items):
         if len(items) % 2 != 0:
-            raise CommandError("wrong number of arguments for MSET")
+            raise _wrong_args("MSET")
         data = list(zip(items[::2], items[1::2]))
         for key, value in data:
             self._kv[key] = value
