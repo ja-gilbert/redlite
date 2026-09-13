@@ -13,8 +13,10 @@ from redlite.protocol import OK, PONG
 
 
 @pytest.fixture
-def server():
-    return Server(port=0)  # constructed, not started - no bindings
+def server(clock):
+    # Constructed, not started - no port is bound. The fake clock is what
+    # lets the TTL tests move time instead of sleeping.
+    return Server(port=0, store=KeyValueStore(clock=clock))
 
 
 def run(server, *parts):
@@ -203,3 +205,72 @@ def test_server_uses_injected_store():
     server = Server(port=0, store=store)
     run(server, b"SET", b"k", b"v")
     assert store.get(b"k") == b"v"  # same object, not a copy
+
+
+def test_ttl_distinguishes_a_missing_key_from_a_key_with_no_expiry(server):
+    # Redis's two negative replies: -2 is "no such key", -1 is "no expiry".
+    assert run(server, b"TTL", b"nope") == -2
+    run(server, b"SET", b"k", b"v")
+    assert run(server, b"TTL", b"k") == -1
+    assert run(server, b"PTTL", b"k") == -1
+
+
+def test_expire_and_pexpire_set_a_countdown_that_ttl_and_pttl_report(server, clock):
+    run(server, b"SET", b"k", b"v")
+    assert run(server, b"EXPIRE", b"k", b"10") == 1
+    assert run(server, b"TTL", b"k") == 10
+    clock.advance(4)
+    assert run(server, b"PTTL", b"k") == 6000
+    assert run(server, b"PEXPIRE", b"k", b"2500") == 1  # replaces the 6s left
+    assert run(server, b"PTTL", b"k") == 2500
+    assert run(server, b"TTL", b"k") == 3  # 2.5s rounds up, as in Redis (not to even)
+    clock.advance(0.2)
+    assert run(server, b"PTTL", b"k") == 2300  # nearest ms, not truncated
+    assert run(server, b"TTL", b"k") == 2
+
+
+def test_persist_removes_the_expiry(server):
+    run(server, b"SET", b"k", b"v")
+    run(server, b"EXPIRE", b"k", b"10")
+    assert run(server, b"PERSIST", b"k") == 1
+    assert run(server, b"TTL", b"k") == -1
+    assert run(server, b"PERSIST", b"k") == 0  # nothing left to remove
+    assert run(server, b"PERSIST", b"nope") == 0
+
+
+def test_expire_on_a_missing_key_is_zero_and_a_bad_timeout_is_an_error(server):
+    assert run(server, b"EXPIRE", b"nope", b"10") == 0
+    run(server, b"SET", b"k", b"v")
+    with pytest.raises(
+        CommandError, match=r"^ERR value is not an integer or out of range$"
+    ):
+        run(server, b"EXPIRE", b"k", b"soon")
+    # Redis keeps expiry times as signed 64-bit milliseconds and refuses what
+    # would not fit, so a TTL or PTTL reply always fits a RESP integer.
+    with pytest.raises(
+        CommandError, match=r"^ERR invalid expire time in 'expire' command$"
+    ):
+        run(server, b"EXPIRE", b"k", b"9223372036854775807")
+    assert run(server, b"TTL", b"k") == -1  # the bad calls changed nothing
+
+
+def test_expire_with_a_timeout_in_the_past_deletes_the_key(server):
+    # Redis deletes right away rather than storing an already-passed expiry.
+    run(server, b"SET", b"k", b"v")
+    run(server, b"EXPIRE", b"k", b"10")
+    assert run(server, b"EXPIRE", b"k", b"0") == 1
+    assert run(server, b"GET", b"k") is None
+    run(server, b"INCR", b"k")  # INCR keeps expiries, so a leaked one would show
+    assert run(server, b"TTL", b"k") == -1
+
+
+def test_set_drops_the_expiry_but_incr_and_append_keep_it(server):
+    # Redis: SET writes a brand-new value, so the old expiry goes with the old
+    # value. INCR and APPEND edit the value in place and leave the expiry alone.
+    run(server, b"SET", b"n", b"1")
+    run(server, b"EXPIRE", b"n", b"10")
+    run(server, b"INCR", b"n")
+    run(server, b"APPEND", b"n", b"0")
+    assert run(server, b"TTL", b"n") == 10
+    run(server, b"SET", b"n", b"5")
+    assert run(server, b"TTL", b"n") == -1

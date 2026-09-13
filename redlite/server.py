@@ -80,6 +80,11 @@ class Server:
             "APPEND": self.append,
             "STRLEN": self.strlen,
             "GETDEL": self.getdel,
+            "EXPIRE": self.expire,
+            "PEXPIRE": self.pexpire,
+            "TTL": self.ttl,
+            "PTTL": self.pttl,
+            "PERSIST": self.persist,
             "QUIT": self.quit,
         }
 
@@ -163,7 +168,7 @@ class Server:
 
     def _incr_by(self, key: Value, delta: int) -> int:
         value = _parse_int(self._store.get(key, b"0")) + delta
-        self._store.set(key, str(value).encode())
+        self._store.set(key, str(value).encode(), keep_ttl=True)
         return value
 
     def incr(self, key: Value) -> int:
@@ -195,7 +200,7 @@ class Server:
 
     def append(self, key: Value, value: bytes) -> int:
         new = self._bytes_at(key) + value
-        self._store.set(key, new)
+        self._store.set(key, new, keep_ttl=True)
         return len(new)
 
     def strlen(self, key: Value) -> int:
@@ -203,6 +208,40 @@ class Server:
 
     def getdel(self, key: Value) -> Value:
         return self._store.pop(key)
+
+    def expire(self, key: Value, seconds: Value) -> int:
+        return self._expire_in(key, _parse_int(seconds) * 1000, "expire")
+
+    def pexpire(self, key: Value, milliseconds: Value) -> int:
+        return self._expire_in(key, _parse_int(milliseconds), "pexpire")
+
+    def _expire_in(self, key: Value, ms: int, command: str) -> int:
+        when = int(self._store.now() * 1000) + ms
+        # Redis keeps expiry times as signed 64-bit milliseconds and refuses a
+        # timeout that would not fit, rather than storing one that overflows.
+        if not -(2**63) <= when < 2**63:
+            raise CommandError(f"ERR invalid expire time in '{command}' command")
+        return int(self._store.expire_at(key, when / 1000))
+
+    def ttl(self, key: Value) -> int:
+        ms = self.pttl(key)
+        if ms < 0:
+            return ms
+        return (ms + 500) // 1000  # to the nearest second, as Redis does
+
+    def pttl(self, key: Value) -> int:
+        # Redis's two negative replies: -2 is "no such key", -1 is "no expiry".
+        # A key whose expiry has passed but is still here reads 0, as in Redis,
+        # so neither sentinel can ever come out of the clock arithmetic.
+        if key not in self._store:
+            return -2
+        when = self._store.expiry(key)
+        if when is None:
+            return -1
+        return max(0, round((when - self._store.now()) * 1000))
+
+    def persist(self, key: Value) -> int:
+        return int(self._store.persist(key))
 
     def connection_handler(self, conn: socket.socket, address: tuple[str, int]) -> None:
         host, port = address
