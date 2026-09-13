@@ -80,3 +80,21 @@ def client_decoded(server_port):
     c.flush()
     yield c
     c.close()
+
+
+class FakeClock:
+    """Stands in for time.time(). Tests move it with advance() instead of sleeping."""
+
+    def __init__(self, now=1_700_000_000.0):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
+
+
+@pytest.fixture
+def clock():
+    return FakeClock()

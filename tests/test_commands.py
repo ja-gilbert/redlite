@@ -8,7 +8,7 @@ error rather than crashing the connection.
 
 import pytest
 
-from redlite import CommandError, Disconnect, Server
+from redlite import CommandError, Disconnect, KeyValueStore, Server
 from redlite.protocol import OK, PONG
 
 
@@ -196,3 +196,10 @@ def test_string_commands_on_non_string_are_wrongtype(server):
         run(server, b"STRLEN", b"n")
     with pytest.raises(CommandError, match=r"^WRONGTYPE"):
         run(server, b"APPEND", b"n", b"x")
+
+
+def test_server_uses_injected_store():
+    store = KeyValueStore()
+    server = Server(port=0, store=store)
+    run(server, b"SET", b"k", b"v")
+    assert store.get(b"k") == b"v"  # same object, not a copy
