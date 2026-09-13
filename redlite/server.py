@@ -1,11 +1,14 @@
 """The gevent TCP server and command dispatch."""
 
+import logging
 from fnmatch import fnmatchcase
 
 from gevent.pool import Pool
 from gevent.server import StreamServer
 
 from .protocol import OK, PONG, CommandError, Disconnect, Error, ProtocolHandler
+
+log = logging.getLogger(__name__)
 
 
 def _wrong_args(command):
@@ -168,7 +171,10 @@ class Server:
         return self._kv.pop(key, None)
 
     def connection_handler(self, conn, address):
-        # Convert "conn" (a socket object) into a file-like object.
+        host, port = address
+        log.debug("client connected from %s:%s", host, port)
+
+        # Convert "conn" (socket object) into a file-like object
         socket_file = conn.makefile("rwb")
 
         # Process client requests until client disconnects.
@@ -182,11 +188,19 @@ class Server:
                 break
             except CommandError as exc:
                 resp = Error(exc.args[0])
+            except Exception:
+                log.exception("unhandled error serving %s:%s; closing", host, port)
+                break
 
             self._protocol.write_response(socket_file, resp)
 
+        log.debug("client disconnected from %s:%s", host, port)
+
     def start(self):
         self._server.start()
+        log.info(
+            "listening on %s:%s", self._server.server_host, self._server.server_port
+        )
 
     def stop(self):
         self._server.stop()
@@ -196,4 +210,5 @@ class Server:
         return self._server.server_port
 
     def run(self):
+        self.start()
         self._server.serve_forever()
