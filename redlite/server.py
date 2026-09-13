@@ -12,6 +12,13 @@ def _wrong_args(command):
     )
 
 
+def _parse_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise CommandError("ERR value is not an integer or out of range")
+
+
 class Server:
     def __init__(self, host="127.0.0.1", port=31337, max_clients=64):
         self._pool = Pool(max_clients)
@@ -36,6 +43,10 @@ class Server:
             "FLUSHALL": self.flush,
             "MGET": self.mget,
             "MSET": self.mset,
+            "INCR": self.incr,
+            "DECR": self.decr,
+            "INCRBY": self.incrby,
+            "DECRBY": self.decrby,
             "QUIT": self.quit,
         }
 
@@ -109,6 +120,23 @@ class Server:
         for key, value in data:
             self._kv[key] = value
         return OK
+
+    def _incr_by(self, key, delta):
+        value = _parse_int(self._kv.get(key, b"0")) + delta
+        self._kv[key] = str(value).encode()
+        return value
+
+    def incr(self, key):
+        return self._incr_by(key, 1)
+
+    def decr(self, key):
+        return self._incr_by(key, -1)
+
+    def incrby(self, key, amount):
+        return self._incr_by(key, _parse_int(amount))
+
+    def decrby(self, key, amount):
+        return self._incr_by(key, -_parse_int(amount))
 
     def connection_handler(self, conn, address):
         # Convert "conn" (a socket object) into a file-like object.
