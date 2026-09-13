@@ -34,3 +34,24 @@ def test_default_clock_is_wall_time():
     before = time.time()
     now = KeyValueStore().now()
     assert before <= now <= time.time()
+
+
+def test_removing_a_key_removes_its_expiry_with_it():
+    # An expiry that outlives its key is a leak, a ghost for the sweeper, and a
+    # timeout the next INCR on that name would inherit. DEL, GETDEL, and
+    # FLUSHDB each go through one of these.
+    store = KeyValueStore()
+
+    def set_with_expiry():
+        store.set(b"k", b"v")
+        store.expire_at(b"k", store.now() + 10)
+
+    set_with_expiry()
+    store.delete(b"k")
+    assert store.expiry(b"k") is None
+    set_with_expiry()
+    store.pop(b"k")
+    assert store.expiry(b"k") is None
+    set_with_expiry()
+    store.clear()
+    assert store.expiry(b"k") is None
