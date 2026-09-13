@@ -26,7 +26,7 @@ Then, in another terminal:
     'world'
 
 ## Roadmap
-- [ ] Tests and CI
-- [ ] Real Redis command names and replies, verified against redis-cli, redis-benchmark, and redis-py
+- [x] Tests and CI
+- [x] Real Redis command names and replies, verified against redis-cli, redis-benchmark, and redis-py
 - [ ] Key expiry (TTL) with lazy and active eviction
 - [ ] Append-only-file persistence with crash recovery
