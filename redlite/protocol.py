@@ -1,7 +1,8 @@
 """The RESP wire protocol: parse requests, serialize responses."""
 
-from collections import namedtuple
-from io import BytesIO
+from collections.abc import Callable, Mapping, Sequence
+from io import BufferedIOBase, BytesIO
+from typing import NamedTuple
 
 
 # We'll use exceptions to notify the connection-handling loop of problems.
@@ -9,23 +10,41 @@ class CommandError(Exception):
     pass
 
 
+class Error(NamedTuple):
+    message: bytes | str
+
+
+class SimpleString(NamedTuple):
+    value: bytes
+
+
+OK = SimpleString(b"OK")
+PONG = SimpleString(b"PONG")
+
+# Everything RESP can carry. Arrays and maps hold Values, so it's recursive.
+type Value = (
+    bytes
+    | str
+    | int
+    | None
+    | Error
+    | SimpleString
+    | Sequence[Value]
+    | Mapping[Value, Value]
+)
+
+
 class Disconnect(Exception):
     """End the connection. If `reply` is given, send that first"""
 
-    def __init__(self, reply=None):
+    def __init__(self, reply: Value = None) -> None:
         super().__init__()
         self.reply = reply
 
 
-Error = namedtuple("Error", ("message",))
-SimpleString = namedtuple("SimpleString", ("value",))
-OK = SimpleString(b"OK")
-PONG = SimpleString(b"PONG")
-
-
 class ProtocolHandler:
-    def __init__(self):
-        self.handlers = {
+    def __init__(self) -> None:
+        self.handlers: dict[bytes, Callable[[BufferedIOBase], Value]] = {
             b"+": self.handle_simple_string,
             b"-": self.handle_error,
             b":": self.handle_integer,
@@ -34,7 +53,7 @@ class ProtocolHandler:
             b"%": self.handle_dict,
         }
 
-    def handle_request(self, socket_file):
+    def handle_request(self, socket_file: BufferedIOBase) -> Value:
         first_byte = socket_file.read(1)
         if not first_byte:
             raise Disconnect()
@@ -48,16 +67,16 @@ class ProtocolHandler:
             return line.split()
         return handler(socket_file)
 
-    def handle_simple_string(self, socket_file):
+    def handle_simple_string(self, socket_file: BufferedIOBase) -> bytes:
         return socket_file.readline().rstrip(b"\r\n")
 
-    def handle_error(self, socket_file):
+    def handle_error(self, socket_file: BufferedIOBase) -> Error:
         return Error(socket_file.readline().rstrip(b"\r\n"))
 
-    def handle_integer(self, socket_file):
+    def handle_integer(self, socket_file: BufferedIOBase) -> int:
         return int(socket_file.readline().rstrip(b"\r\n"))
 
-    def handle_string(self, socket_file):
+    def handle_string(self, socket_file: BufferedIOBase) -> bytes | None:
         # First read the length ($<length>\r\n).
         length = int(socket_file.readline().rstrip(b"\r\n"))
         if length == -1:
@@ -65,23 +84,23 @@ class ProtocolHandler:
         length += 2  # Include the trailing \r\n in count.
         return socket_file.read(length)[:-2]
 
-    def handle_array(self, socket_file):
+    def handle_array(self, socket_file: BufferedIOBase) -> list[Value]:
         num_elements = int(socket_file.readline().rstrip(b"\r\n"))
         return [self.handle_request(socket_file) for _ in range(num_elements)]
 
-    def handle_dict(self, socket_file):
+    def handle_dict(self, socket_file: BufferedIOBase) -> dict[Value, Value]:
         num_items = int(socket_file.readline().rstrip(b"\r\n"))
         elements = [self.handle_request(socket_file) for _ in range(num_items * 2)]
         return dict(zip(elements[::2], elements[1::2]))
 
-    def write_response(self, socket_file, data):
+    def write_response(self, socket_file: BufferedIOBase, data: Value) -> None:
         buf = BytesIO()
         self._write(buf, data)
         buf.seek(0)
         socket_file.write(buf.getvalue())
         socket_file.flush()
 
-    def _write(self, buf, data):
+    def _write(self, buf: BytesIO, data: Value) -> None:
         if isinstance(data, str):
             data = data.encode("utf-8")
 
