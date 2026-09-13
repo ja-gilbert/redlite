@@ -148,3 +148,41 @@ def test_non_int_val_or_amount_is_error_and_leaves_store_alone(server):
     ):
         run(server, b"INCRBY", b"word", b"abc")
     assert run(server, b"GET", b"word") == b"hello"
+
+
+def test_exist_counts_how_many_keys_are_present(server):
+    run(server, b"MSET", b"a", b"1", b"b", b"2")
+    assert run(server, b"EXISTS", b"a", b"b", b"nope") == 2
+    assert run(server, b"EXISTS", b"nope") == 0
+    with pytest.raises(CommandError):
+        run(server, b"EXISTS")
+
+
+def test_dbsize_tracks_num_keys(server):
+    assert run(server, b"DBSIZE") == 0
+    run(server, b"MSET", b"a", b"1", b"b", b"2")
+    assert run(server, b"DBSIZE") == 2
+    run(server, b"DEL", b"a")
+    assert run(server, b"DBSIZE") == 1
+
+
+def test_keys_return_matching_glob(server):
+    run(server, b"MSET", b"user:1", b"x", b"user:2", b"y", b"hits", b"z")
+    assert sorted(run(server, b"KEYS", b"user:*")) == [b"user:1", b"user:2"]
+    assert sorted(run(server, b"KEYS", b"*")) == [b"hits", b"user:1", b"user:2"]
+    assert run(server, b"KEYS", b"nomatch*") == []
+
+
+def test_append_extends_value_and_strlen_measures(server):
+    assert run(server, b"STRLEN", b"k") == 0  # missing key has length 0
+    assert run(server, b"APPEND", b"k", b"hello") == 5  # missing key: append to empty
+    assert run(server, b"APPEND", b"k", b" world") == 11
+    assert run(server, b"GET", b"k") == b"hello world"
+    assert run(server, b"STRLEN", b"k") == 11
+
+
+def test_getdel_returns_Value_and_removes_key(server):
+    run(server, b"SET", b"k", b"v")
+    assert run(server, b"GETDEL", b"k") == b"v"
+    assert run(server, b"GET", b"k") is None
+    assert run(server, b"GETDEL", b"k") is None  # already gone

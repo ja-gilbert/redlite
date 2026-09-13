@@ -1,5 +1,7 @@
 """The gevent TCP server and command dispatch."""
 
+from fnmatch import fnmatchcase
+
 from gevent.pool import Pool
 from gevent.server import StreamServer
 
@@ -47,6 +49,12 @@ class Server:
             "DECR": self.decr,
             "INCRBY": self.incrby,
             "DECRBY": self.decrby,
+            "EXISTS": self.exists,
+            "DBSIZE": self.dbsize,
+            "KEYS": self.keys,
+            "APPEND": self.append,
+            "STRLEN": self.strlen,
+            "GETDEL": self.getdel,
             "QUIT": self.quit,
         }
 
@@ -137,6 +145,27 @@ class Server:
 
     def decrby(self, key, amount):
         return self._incr_by(key, -_parse_int(amount))
+
+    def exists(self, *keys):
+        if not keys:
+            raise _wrong_args("EXISTS")
+        return sum(1 for key in keys if key in self._kv)
+
+    def dbsize(self):
+        return len(self._kv)
+
+    def keys(self, pattern):
+        return [key for key in self._kv if fnmatchcase(key, pattern)]
+
+    def append(self, key, value):
+        self._kv[key] = self._kv.get(key, b"") + value
+        return len(self._kv[key])
+
+    def strlen(self, key):
+        return len(self._kv.get(key, b""))
+
+    def getdel(self, key):
+        return self._kv.pop(key, None)
 
     def connection_handler(self, conn, address):
         # Convert "conn" (a socket object) into a file-like object.
