@@ -18,6 +18,7 @@ from .protocol import (
     SimpleString,
     Value,
 )
+from .store import KeyValueStore
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +40,11 @@ def _parse_int(value: Value) -> int:
 
 class Server:
     def __init__(
-        self, host: str = "127.0.0.1", port: int = 31337, max_clients: int = 64
+        self,
+        host: str = "127.0.0.1",
+        port: int = 31337,
+        max_clients: int = 64,
+        store: KeyValueStore | None = None,
     ) -> None:
         self._pool = Pool(max_clients)
         self._server = StreamServer(
@@ -47,7 +52,9 @@ class Server:
         )
 
         self._protocol = ProtocolHandler()
-        self._kv: dict[Value, Value] = {}
+        # `is not None`, not `or`: an empty store has len() 0, so
+        # `store or KeyValueStore()` would quietly replace an injected one.
+        self._store = store if store is not None else KeyValueStore()
 
         self._commands = self.get_commands()
 
@@ -115,10 +122,10 @@ class Server:
         raise Disconnect(reply=OK)
 
     def get(self, key: Value) -> Value:
-        return self._kv.get(key)
+        return self._store.get(key)
 
     def set(self, key: Value, value: Value) -> SimpleString:
-        self._kv[key] = value
+        self._store.set(key, value)
         return OK
 
     def delete(self, *keys: Value) -> int:
@@ -126,29 +133,28 @@ class Server:
             raise _wrong_args("DEL")
         removed = 0
         for key in keys:
-            if key in self._kv:
-                del self._kv[key]
+            if self._store.delete(key):
                 removed += 1
         return removed
 
     def flush(self) -> SimpleString:
-        self._kv.clear()
+        self._store.clear()
         return OK
 
     def mget(self, *keys: Value) -> list[Value]:
-        return [self._kv.get(key) for key in keys]
+        return [self._store.get(key) for key in keys]
 
     def mset(self, *items: Value) -> SimpleString:
         if len(items) % 2 != 0:
             raise _wrong_args("MSET")
         data = list(zip(items[::2], items[1::2]))
         for key, value in data:
-            self._kv[key] = value
+            self._store.set(key, value)
         return OK
 
     def _bytes_at(self, key: Value) -> bytes:
         """The string value at `key` (empty if missing). Any other type is a WRONGTYPE."""
-        value = self._kv.get(key, b"")
+        value = self._store.get(key, b"")
         if not isinstance(value, bytes):
             raise CommandError(
                 "WRONGTYPE Operation against a key holding the wrong kind of value"
@@ -156,8 +162,8 @@ class Server:
         return value
 
     def _incr_by(self, key: Value, delta: int) -> int:
-        value = _parse_int(self._kv.get(key, b"0")) + delta
-        self._kv[key] = str(value).encode()
+        value = _parse_int(self._store.get(key, b"0")) + delta
+        self._store.set(key, str(value).encode())
         return value
 
     def incr(self, key: Value) -> int:
@@ -175,28 +181,28 @@ class Server:
     def exists(self, *keys: Value) -> int:
         if not keys:
             raise _wrong_args("EXISTS")
-        return sum(1 for key in keys if key in self._kv)
+        return sum(1 for key in keys if key in self._store)
 
     def dbsize(self) -> int:
-        return len(self._kv)
+        return len(self._store)
 
     def keys(self, pattern: bytes) -> list[bytes]:
         return [
             key
-            for key in self._kv
+            for key in self._store
             if isinstance(key, bytes) and fnmatchcase(key, pattern)
         ]
 
     def append(self, key: Value, value: bytes) -> int:
         new = self._bytes_at(key) + value
-        self._kv[key] = new
+        self._store.set(key, new)
         return len(new)
 
     def strlen(self, key: Value) -> int:
         return len(self._bytes_at(key))
 
     def getdel(self, key: Value) -> Value:
-        return self._kv.pop(key, None)
+        return self._store.pop(key)
 
     def connection_handler(self, conn: socket.socket, address: tuple[str, int]) -> None:
         host, port = address
