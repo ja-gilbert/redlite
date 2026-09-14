@@ -332,3 +332,41 @@ def test_set_rejects_bad_options_before_writing(server):
             run(server, b"SET", b"k", b"new", *bad)
     assert run(server, b"GET", b"k") == b"old"
     assert run(server, b"TTL", b"k") == -1
+
+
+def test_key_lives_up_to_deadline_and_next_read_frees_it(server, clock):
+    run(server, b"SET", b"k", b"v", b"EX", b"10")
+    clock.advance(10)
+    # Redis's keyIsExpired is strictly after, so at the deadline itself the
+    # key is still here and PTTL reads 0, never one of the sentinels
+    assert run(server, b"GET", b"k") == b"v"
+    assert run(server, b"PTTL", b"k") == 0
+    clock.advance(1)
+    assert run(server, b"DBSIZE") == 1  # still in memory: nothing has touched it
+    assert run(server, b"GET", b"k") is None
+    assert run(server, b"DBSIZE") == 0  # the read that found it expired freed it
+    assert run(server, b"TTL", b"k") == -2
+
+
+def test_every_command_sees_an_expired_key_as_missing(server, clock):
+    # Each call below is the first to touch the key after it expired, so
+    # each must notice on its own: there is no sweeper yet, and the ones
+    # that write (DEL, PERSIST, EXPIRE) must not act on a ghost.
+    def expired_key():
+        run(server, b"SET", b"k", b"v", b"EX", b"10")
+        clock.advance(11)
+
+    for command, reply in [
+        ((b"EXISTS", b"k"), 0),
+        ((b"KEYS", b"*"), []),
+        ((b"DEL", b"k"), 0),
+        ((b"GETDEL", b"k"), None),
+        ((b"PERSIST", b"k"), 0),
+        ((b"EXPIRE", b"k", b"10"), 0),
+    ]:
+        expired_key()
+        assert run(server, *command) == reply, command
+    expired_key()
+    run(server, b"SET", b"k", b"v2", b"KEEPTTL")  # nothing left to keep
+    assert run(server, b"GET", b"k") == b"v2"
+    assert run(server, b"TTL", b"k") == -1
