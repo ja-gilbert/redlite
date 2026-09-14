@@ -55,3 +55,17 @@ def test_removing_a_key_removes_its_expiry_with_it():
     set_with_expiry()
     store.clear()
     assert store.expiry(b"k") is None
+
+
+def test_expiry_does_not_reap_so_a_dying_key_never_reads_as_persistent(clock):
+    # PTTL asks __contains__ first and expiry() second, reading the clock for
+    # each. If expiry() reaped too, a key that was live for the first question
+    # and dead for the second would answer None, which PTTL reads as -1, "no
+    # expiry": the opposite of the -2 Redis replies for a key that is gone.
+    store = KeyValueStore(clock=clock)
+    store.set(b"k", b"v")
+    deadline = clock.now + 10
+    store.expire_at(b"k", deadline)
+    assert b"k" in store  # live, so PTTL gets past its first question
+    clock.advance(11)  # the deadline passes between the two questions
+    assert store.expiry(b"k") == deadline  # the deadline, not None

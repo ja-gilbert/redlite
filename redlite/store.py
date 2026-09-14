@@ -23,10 +23,29 @@ class KeyValueStore:
         """
         return self._clock()
 
+    def _live(self, key: Value) -> bool:
+        """Whether `key` exists, deleting it first if its expiry has passed.
+
+        This is lazy expiry: every method that touches a key goes through
+        here (expiry() is the one exception, and says why), so an expired
+        key is never seen, and it is freed by whichever command trips over
+        it. Keys nothing touches are the sweeper's job.
+        """
+        when = self._expires.get(key)
+        # Strictly after, as Redis's keyIsExpired: a key that expires this
+        # very instant is still here (EXPIRE 0, by contrast, deletes at once).
+        if when is not None and self.now() > when:
+            del self._data[key]
+            del self._expires[key]
+        return key in self._data
+
     def get(self, key: Value, default: Value = None) -> Value:
-        return self._data.get(key, default)
+        if not self._live(key):
+            return default
+        return self._data[key]
 
     def set(self, key: Value, value: Value, keep_ttl: bool = False) -> None:
+        self._live(key)  # an expired key must not lend keep_ttl its old expiry
         self._data[key] = value
         # A fresh write drops the expiry, as Redis's SET does. Commands that
         # edit the value in place (i.e. INCR, APPEND) pass keep_ttl=True
@@ -35,7 +54,7 @@ class KeyValueStore:
 
     def delete(self, key: Value) -> bool:
         """Remove `key`. True if it was there."""
-        if key not in self._data:
+        if not self._live(key):
             return False
         del self._data[key]
         self._expires.pop(key, None)
@@ -43,8 +62,10 @@ class KeyValueStore:
 
     def pop(self, key: Value) -> Value:
         """Remove `key` and return its value, or None if it wasn't there."""
+        if not self._live(key):
+            return None
         self._expires.pop(key, None)
-        return self._data.pop(key, None)
+        return self._data.pop(key)
 
     def clear(self) -> None:
         self._data.clear()
@@ -56,7 +77,7 @@ class KeyValueStore:
         A time already in the past deletes the key on the spot, which is what
         Redis does for EXPIRE with a timeout of zero or less.
         """
-        if key not in self._data:
+        if not self._live(key):
             return False
         if when <= self.now():
             self.delete(key)
@@ -66,18 +87,25 @@ class KeyValueStore:
 
     def expiry(self, key: Value) -> float | None:
         """When `key` expires, in now()'s seconds, or None if it never does."""
+        # The one key method that does not reap. PTTL asks __contains__ first;
+        # if a second reap here caught the deadline passing in between, PTTL
+        # would answer -1 ("no expiry") for a key Redis says is gone (-2).
         return self._expires.get(key)
 
     def persist(self, key: Value) -> bool:
         """Remove `key`'s expiry. True if it had one."""
+        if not self._live(key):
+            return False
         return self._expires.pop(key, None) is not None
 
     def __contains__(self, key: Value) -> bool:
-        return key in self._data
+        return self._live(key)
 
     def __len__(self) -> int:
+        # Deliberately raw: like Redis's DBSIZE, this counts expired keys the
+        # sweeper has not reached yet. Checking each one would make it O(n).
         return len(self._data)
 
     def __iter__(self) -> Iterator[Value]:
         # A snapshot, so caller may delete keys while iterating
-        return iter(list(self._data))
+        return (key for key in list(self._data) if self._live(key))
