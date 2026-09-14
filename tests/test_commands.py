@@ -274,3 +274,61 @@ def test_set_drops_the_expiry_but_incr_and_append_keep_it(server):
     assert run(server, b"TTL", b"n") == 10
     run(server, b"SET", b"n", b"5")
     assert run(server, b"TTL", b"n") == -1
+
+
+def test_set_with_ex_or_px_sets_val_and_expiry_together(server):
+    assert run(server, b"SET", b"k", b"v", b"EX", b"10") == OK
+    assert run(server, b"GET", b"k") == b"v"
+    assert run(server, b"TTL", b"k") == 10
+    # Options are case-insensitive, and a new expiry replaces old ones.
+    assert run(server, b"SET", b"k", b"v", b"px", b"1500") == OK
+    assert run(server, b"PTTL", b"k") == 1500
+
+
+def test_set_nx_creates_and_xx_overwrites_only(server):
+    # Redis replies nil, not an error, when the condition says "don't write".
+    # NX with an expiry is the lock: a refused write, with or without
+    # its own expiry, must leave the holder's value and expiry alone
+    assert run(server, b"SET", b"k", b"v", b"EX", b"10", b"NX") == OK
+    assert run(server, b"SET", b"k", b"other", b"EX", b"5", b"NX") is None
+    assert run(server, b"SET", b"k", b"other", b"NX") is None
+    assert run(server, b"GET", b"k") == b"v"
+    assert run(server, b"TTL", b"k") == 10
+    assert run(server, b"SET", b"nope", b"v", b"XX") is None
+    assert run(server, b"EXISTS", b"nope") == 0
+    assert run(server, b"SET", b"k", b"other", b"XX") == OK
+    assert run(server, b"GET", b"k") == b"other"
+
+
+def test_set_keepttl_changes_the_value_but_not_expiry(server):
+    run(server, b"SET", b"k", b"v", b"EX", b"10")
+    assert run(server, b"SET", b"k", b"v2", b"KEEPTTL") == OK
+    assert run(server, b"GET", b"k") == b"v2"
+    assert run(server, b"TTL", b"k") == 10
+
+
+def test_set_rejects_bad_options_before_writing(server):
+    run(server, b"SET", b"k", b"old")
+    # Unlike EXPIRE 0, SET ... EX 0 is refused outright, as is a deadline
+    # past int64: Redis checks the options before it touches the key.
+    for amount in (b"0", b"9223372036854775807"):
+        with pytest.raises(
+            CommandError, match=r"^ERR invalid expire time in 'set' command$"
+        ):
+            run(server, b"SET", b"k", b"new", b"EX", amount)
+    with pytest.raises(
+        CommandError, match=r"^ERR value is not an integer or out of range$"
+    ):
+        run(server, b"SET", b"k", b"new", b"EX", b"soon")
+    # An unknown option, pairs that conflict, and one missing its amount.
+    for bad in (
+        [b"BOGUS"],
+        [b"NX", b"XX"],
+        [b"EX", b"10", b"PX", b"5"],
+        [b"EX", b"10", b"KEEPTTL"],
+        [b"EX"],
+    ):
+        with pytest.raises(CommandError, match=r"^ERR syntax error$"):
+            run(server, b"SET", b"k", b"new", *bad)
+    assert run(server, b"GET", b"k") == b"old"
+    assert run(server, b"TTL", b"k") == -1

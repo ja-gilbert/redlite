@@ -38,6 +38,44 @@ def _parse_int(value: Value) -> int:
     raise CommandError("ERR value is not an integer or out of range")
 
 
+def _parse_set_options(
+    options: tuple[Value, ...],
+) -> tuple[int | None, bool, bytes | None]:
+    """SET's trailing options, as (expiry in ms, keep old expiry, NX or XX).
+
+    Mirrors Redis: options combine in any order case, EX and PX exclude
+    each other and KEEPTTL, NX excludes XX, and anything else is a syntax
+    error. The expiry amount is checked last, after the syntax, just like Redis.
+    """
+    expire: tuple[bytes, Value] | None = None  # (EX or PX, the raw amount)
+    keep_ttl = False
+    condition: bytes | None = None
+    i = 0
+    while i < len(options):
+        arg = options[i]
+        token = arg.upper() if isinstance(arg, bytes) else b""
+        if token in (b"EX", b"PX") and not keep_ttl and i + 1 < len(options):
+            if expire is not None and expire[0] != token:
+                raise CommandError("ERR syntax error")
+            expire = (token, options[i + 1])
+            i += 2
+        elif token == b"KEEPTTL" and expire is None:
+            keep_ttl = True
+            i += 1
+        elif token in (b"NX", b"XX") and condition in (None, token):
+            condition = token
+            i += 1
+        else:
+            raise CommandError("ERR syntax error")
+    if expire is None:
+        return None, keep_ttl, condition
+    unit, amount = expire
+    ms = _parse_int(amount)
+    if ms <= 0:
+        raise CommandError("ERR invalid expire time in 'set' command")
+    return ms * (1000 if unit == b"EX" else 1), keep_ttl, condition
+
+
 class Server:
     def __init__(
         self,
@@ -129,8 +167,17 @@ class Server:
     def get(self, key: Value) -> Value:
         return self._store.get(key)
 
-    def set(self, key: Value, value: Value) -> SimpleString:
-        self._store.set(key, value)
+    def set(self, key: Value, value: Value, *options: Value) -> Value:
+        expire_ms, keep_ttl, condition = _parse_set_options(options)
+        # Work out the deadline first: bad ones must fail before any writes.
+        when = None if expire_ms is None else self._deadline(expire_ms, "set")
+        if condition == b"NX" and key in self._store:
+            return None
+        if condition == b"XX" and key not in self._store:
+            return None
+        self._store.set(key, value, keep_ttl=keep_ttl)
+        if when is not None:
+            self._store.expire_at(key, when)
         return OK
 
     def delete(self, *keys: Value) -> int:
@@ -215,13 +262,17 @@ class Server:
     def pexpire(self, key: Value, milliseconds: Value) -> int:
         return self._expire_in(key, _parse_int(milliseconds), "pexpire")
 
-    def _expire_in(self, key: Value, ms: int, command: str) -> int:
+    def _deadline(self, ms: int, command: str) -> float:
+        """The time `ms` from now, in the store's seconds, or a Redis error."""
         when = int(self._store.now() * 1000) + ms
-        # Redis keeps expiry times as signed 64-bit milliseconds and refuses a
-        # timeout that would not fit, rather than storing one that overflows.
+        # Redis keeps expiry times as signed 64-bit milliseconds and refuses
+        # timeouts that would not fit, rather than storing one that overflows.
         if not -(2**63) <= when < 2**63:
             raise CommandError(f"ERR invalid expire time in '{command}' command")
-        return int(self._store.expire_at(key, when / 1000))
+        return when / 1000
+
+    def _expire_in(self, key: Value, ms: int, command: str) -> int:
+        return int(self._store.expire_at(key, self._deadline(ms, command)))
 
     def ttl(self, key: Value) -> int:
         ms = self.pttl(key)
