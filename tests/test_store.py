@@ -69,3 +69,27 @@ def test_expiry_does_not_reap_so_a_dying_key_never_reads_as_persistent(clock):
     assert b"k" in store  # live, so PTTL gets past its first question
     clock.advance(11)  # the deadline passes between the two questions
     assert store.expiry(b"k") == deadline  # the deadline, not None
+
+
+def test_sweep_frees_expired_keys_nothing_has_touched(clock):
+    # Lazy expiry only frees a key when a command reads it. This is the other
+    # half: sweeper will sample keys with an expiry and keep going while most
+    # of the sample turns out dead, so a pile of dead keys all go in one call.
+    store = KeyValueStore(clock=clock)
+    for i in range(100):
+        store.set(f"dead{i}".encode(), b"v")
+        store.expire_at(f"dead{i}".encode(), clock.now + 10)
+    # Keys that can't expire must not dilute the sample: Redis samples
+    # db->expires, not the keyspace, so a pile of these changes nothing
+    for i in range(1000):
+        store.set(f"forever{i}".encode(), b"v")
+    store.set(b"later", b"v")
+    store.expire_at(b"later", clock.now + 100)
+    clock.advance(11)
+    assert len(store) == 1101  # nothing has read them, so nothing has freed them
+    # Redis caps each cycle so a mass expiry cannot stall the server; the cap
+    # is checked before each round, so with no budget at all nothing is sampled.
+    assert store.sweep(budget=0) == 0
+    # Given time, it keeps sampling while most of each sample is dead.
+    assert store.sweep(budget=1) == 100
+    assert len(store) == 1001

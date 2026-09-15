@@ -7,6 +7,7 @@ real connection, decode_responses, and shared state across connections.
 """
 
 import socket
+import time
 
 import pytest
 
@@ -106,3 +107,18 @@ def test_client_works_as_context_manager(server_port):
         assert c.set("k", "v") == b"OK"
     with pytest.raises((OSError, ValueError)):
         c.get("k")  # closed on leaving the block
+
+
+def test_the_sweeper_frees_expired_keys_nobody_reads(client):
+    # DBSIZE never reaps, so it can only drop to 0 if the background sweeper
+    # freed the keys on its own. This is the one test that has to wait for
+    # real time: it is proving the greenlet actually runs in the server. It
+    # polls rather than sleeping a fixed stretch because expiry is keyed off
+    # the wall clock, and a loaded runner, or a wall clock that steps
+    # backwards as WSL2's does, can hold the keys live a second longer.
+    for i in range(50):
+        client.execute("SET", f"k{i}", "v", "PX", "100")
+    deadline = time.monotonic() + 5  # normally done in roughly 0.2s
+    while client.execute("DBSIZE") != 0 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert client.execute("DBSIZE") == 0

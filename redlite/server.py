@@ -4,6 +4,7 @@ import logging
 from collections.abc import Callable
 from fnmatch import fnmatchcase
 
+import gevent
 from gevent import socket
 from gevent.pool import Pool
 from gevent.server import StreamServer
@@ -95,6 +96,7 @@ class Server:
         self._store = store if store is not None else KeyValueStore()
 
         self._commands = self.get_commands()
+        self._sweeper: gevent.Greenlet[[], None] | None = None
 
     def get_commands(self) -> dict[str, Callable[..., Value]]:
         return {
@@ -320,13 +322,23 @@ class Server:
 
         log.debug("client disconnected from %s:%s", host, port)
 
+    def _sweep_forever(self) -> None:
+        # Redis runs active expiry cycle ten times a second. The sleep is
+        # what hands the event loop back to the clients in between.
+        while True:
+            self._store.sweep()
+            gevent.sleep(0.1)
+
     def start(self) -> None:
         self._server.start()
+        self._sweeper = gevent.spawn(self._sweep_forever)
         log.info(
             "listening on %s:%s", self._server.server_host, self._server.server_port
         )
 
     def stop(self) -> None:
+        if self._sweeper is not None:
+            self._sweeper.kill()
         self._server.stop()
 
     @property
