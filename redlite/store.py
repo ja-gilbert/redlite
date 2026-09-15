@@ -1,5 +1,6 @@
 """The key-value store: one dict, plus the clock that decides when keys will expire."""
 
+import random
 import time
 from collections.abc import Callable, Iterator
 
@@ -97,6 +98,35 @@ class KeyValueStore:
         if not self._live(key):
             return False
         return self._expires.pop(key, None) is not None
+
+    def sweep(self, sample: int = 20, budget: float = 0.025) -> int:
+        """One cycle of active expiry, done the way Redis does it.
+
+        Look at up to `sample` random keys that have an expiry, free the dead
+        ones, and go again while more than a quarter of them were dead: the
+        sample says the rest of the keyspace is probably like this. Stop
+        after `budget` seconds regardless, so a mass expiry cannot stall the
+        server. Returns how many keys were freed.
+        """
+        stop_at = time.monotonic() + budget
+        freed = 0
+        # One O(n) snapshot of the candidates per cycle: a fresh list() every
+        # round would spend the whole budget copying instead of freeing keys.
+        # Each round takes its sample out of the snapshot, moving the last
+        # entry over the one it took, so no key is looked at twice in a cycle.
+        pool = list(self._expires)
+        while pool and time.monotonic() < stop_at:
+            keys = []
+            for _ in range(min(sample, len(pool))):
+                i = random.randrange(len(pool))
+                keys.append(pool[i])
+                pool[i] = pool[-1]
+                pool.pop()
+            dead = sum(1 for key in keys if not self._live(key))
+            freed += dead
+            if dead * 4 <= len(keys):
+                break
+        return freed
 
     def __contains__(self, key: Value) -> bool:
         return self._live(key)

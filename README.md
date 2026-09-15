@@ -28,5 +28,5 @@ Then, in another terminal:
 ## Roadmap
 - [x] Tests and CI
 - [x] Real Redis command names and replies, verified against redis-cli, redis-benchmark, and redis-py
-- [ ] Key expiry (TTL) with lazy and active eviction
+- [x] Key expiry (TTL) with lazy and active eviction
 - [ ] Append-only-file persistence with crash recovery
