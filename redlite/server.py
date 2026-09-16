@@ -71,10 +71,10 @@ def _parse_set_options(
     if expire is None:
         return None, keep_ttl, condition
     unit, amount = expire
-    ms = _parse_int(amount)
-    if ms <= 0:
+    ttl = _parse_int(amount)
+    if ttl <= 0:
         raise CommandError("ERR invalid expire time in 'set' command")
-    return ms * (1000 if unit == b"EX" else 1), keep_ttl, condition
+    return ttl * (1000 if unit == b"EX" else 1), keep_ttl, condition
 
 
 class Server:
@@ -144,11 +144,12 @@ class Server:
             raise CommandError("ERR command name must be a string")
         command = command.upper()
 
-        if command not in self._commands:
+        handler = self._commands.get(command)
+        if handler is None:
             raise CommandError(f"ERR unknown command '{command}'")
 
         try:
-            return self._commands[command](*data[1:])
+            return handler(*data[1:])
         except TypeError:
             raise _wrong_args(command)
 
@@ -185,11 +186,7 @@ class Server:
     def delete(self, *keys: Value) -> int:
         if not keys:
             raise _wrong_args("DEL")
-        removed = 0
-        for key in keys:
-            if self._store.delete(key):
-                removed += 1
-        return removed
+        return sum(1 for key in keys if self._store.delete(key))
 
     def flush(self) -> SimpleString:
         self._store.clear()
@@ -201,8 +198,7 @@ class Server:
     def mset(self, *items: Value) -> SimpleString:
         if len(items) % 2 != 0:
             raise _wrong_args("MSET")
-        data = list(zip(items[::2], items[1::2]))
-        for key, value in data:
+        for key, value in zip(items[::2], items[1::2]):
             self._store.set(key, value)
         return OK
 
@@ -300,10 +296,8 @@ class Server:
         host, port = address
         log.debug("client connected from %s:%s", host, port)
 
-        # Convert "conn" (socket object) into a file-like object
         socket_file = conn.makefile("rwb")
 
-        # Process client requests until client disconnects.
         while True:
             try:
                 data = self._protocol.handle_request(socket_file)

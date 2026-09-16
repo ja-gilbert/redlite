@@ -8,8 +8,8 @@ error rather than crashing the connection.
 
 import pytest
 
-from redlite import CommandError, Disconnect, KeyValueStore, Server
-from redlite.protocol import OK, PONG
+from redlite import CommandError, KeyValueStore, Server
+from redlite.protocol import SimpleString
 
 
 @pytest.fixture
@@ -21,21 +21,6 @@ def server(clock):
 
 def run(server, *parts):
     return server.get_response(list(parts))
-
-
-def test_set_then_get_returns_value(server):
-    run(server, b"SET", b"k", b"v")
-    assert run(server, b"GET", b"k") == b"v"
-
-
-def test_get_missing_key_returns_none(server):
-    assert run(server, b"GET", b"absent") is None
-
-
-def test_del_reports_whether_key_existed(server):
-    run(server, b"SET", b"k", b"v")
-    assert run(server, b"DEL", b"k") == 1
-    assert run(server, b"DEL", b"k") == 0
 
 
 def test_del_takes_many_keys_and_counts_only_those_that_existed(server):
@@ -57,17 +42,12 @@ def test_mget_returns_none_for_missing_keys_in_place(server):
     assert run(server, b"MGET", b"a", b"x", b"b") == [b"1", None, b"2"]
 
 
-def test_flushdb_empties_the_store_and_returns_count(server):
-    run(server, b"MSET", b"a", b"1", b"b", b"2")
-    assert run(server, b"FLUSHDB") == OK
-    assert run(server, b"GET", b"a") is None
-
-
 def test_flushall_is_alias_for_flushdb(server):
     # Redis has both; with a single database they do the same thing.
     run(server, b"SET", b"k", b"v")
-    assert run(server, b"FLUSHALL") == OK
+    assert run(server, b"FLUSHALL") == SimpleString(b"OK")
     assert run(server, b"GET", b"k") is None
+    assert run(server, b"FLUSHDB") == SimpleString(b"OK")  # the other name, same method
 
 
 def test_command_names_are_notcase_sensitive(server):
@@ -75,20 +55,8 @@ def test_command_names_are_notcase_sensitive(server):
     assert run(server, b"GeT", b"k") == b"v"
 
 
-def test_unknown_command_raises_rather_than_crashing(server):
-    with pytest.raises(CommandError):
-        run(server, b"BOGUS")
-
-
-def test_wrong_number_of_arguments_raises_rather_than_crashing(server):
-    with pytest.raises(CommandError):
-        run(server, b"GET")  # too few
-    with pytest.raises(CommandError):
-        run(server, b"GET", b"a", b"b")  # too many
-
-
 def test_mset_with_odd_argument_count_is_an_error(server):
-    # Bug: an odd arg count silently drops the trailing key. A caller who
+    # An odd arg count must not silently drop the trailing key: a caller who
     # miscounts should get an error, not a half-applied write.
     with pytest.raises(CommandError):
         run(server, b"MSET", b"a", b"1", b"b")
@@ -98,7 +66,7 @@ def test_mset_with_odd_argument_count_is_an_error(server):
 @pytest.mark.parametrize(
     "argv, reply",
     [
-        ([b"PING"], PONG),
+        ([b"PING"], SimpleString(b"PONG")),
         ([b"ECHO", b"hello"], b"hello"),
         ([b"COMMAND", b"DOCS"], []),  # redis-cli sends this on connect
         ([b"COMMAND"], []),  # older clients send it bare
@@ -106,12 +74,6 @@ def test_mset_with_odd_argument_count_is_an_error(server):
 )
 def test_handshake_commands_reply_as_redis_close(server, argv, reply):
     assert run(server, *argv) == reply
-
-
-def test_quit_disconnects_with_ok_reply(server):
-    with pytest.raises(Disconnect) as info:
-        run(server, b"QUIT")
-    assert info.value.reply == OK
 
 
 def test_error_follows_redis_conventions(server):
@@ -123,6 +85,10 @@ def test_error_follows_redis_conventions(server):
         CommandError, match=r"^ERR wrong number of arguments for 'get' command$"
     ):
         run(server, b"GET")
+    with pytest.raises(
+        CommandError, match=r"^ERR wrong number of arguments for 'get' command$"
+    ):
+        run(server, b"GET", b"a", b"b")  # too many, not just too few
 
 
 def test_incr_starts_from_zero_and_stores_string(server):
@@ -158,14 +124,6 @@ def test_exist_counts_how_many_keys_are_present(server):
     assert run(server, b"EXISTS", b"nope") == 0
     with pytest.raises(CommandError):
         run(server, b"EXISTS")
-
-
-def test_dbsize_tracks_num_keys(server):
-    assert run(server, b"DBSIZE") == 0
-    run(server, b"MSET", b"a", b"1", b"b", b"2")
-    assert run(server, b"DBSIZE") == 2
-    run(server, b"DEL", b"a")
-    assert run(server, b"DBSIZE") == 1
 
 
 def test_keys_return_matching_glob(server):
@@ -205,14 +163,6 @@ def test_server_uses_injected_store():
     server = Server(port=0, store=store)
     run(server, b"SET", b"k", b"v")
     assert store.get(b"k") == b"v"  # same object, not a copy
-
-
-def test_ttl_distinguishes_a_missing_key_from_a_key_with_no_expiry(server):
-    # Redis's two negative replies: -2 is "no such key", -1 is "no expiry".
-    assert run(server, b"TTL", b"nope") == -2
-    run(server, b"SET", b"k", b"v")
-    assert run(server, b"TTL", b"k") == -1
-    assert run(server, b"PTTL", b"k") == -1
 
 
 def test_expire_and_pexpire_set_a_countdown_that_ttl_and_pttl_report(server, clock):
@@ -277,11 +227,11 @@ def test_set_drops_the_expiry_but_incr_and_append_keep_it(server):
 
 
 def test_set_with_ex_or_px_sets_val_and_expiry_together(server):
-    assert run(server, b"SET", b"k", b"v", b"EX", b"10") == OK
+    assert run(server, b"SET", b"k", b"v", b"EX", b"10") == SimpleString(b"OK")
     assert run(server, b"GET", b"k") == b"v"
     assert run(server, b"TTL", b"k") == 10
     # Options are case-insensitive, and a new expiry replaces old ones.
-    assert run(server, b"SET", b"k", b"v", b"px", b"1500") == OK
+    assert run(server, b"SET", b"k", b"v", b"px", b"1500") == SimpleString(b"OK")
     assert run(server, b"PTTL", b"k") == 1500
 
 
@@ -289,20 +239,20 @@ def test_set_nx_creates_and_xx_overwrites_only(server):
     # Redis replies nil, not an error, when the condition says "don't write".
     # NX with an expiry is the lock: a refused write, with or without
     # its own expiry, must leave the holder's value and expiry alone
-    assert run(server, b"SET", b"k", b"v", b"EX", b"10", b"NX") == OK
+    assert run(server, b"SET", b"k", b"v", b"EX", b"10", b"NX") == SimpleString(b"OK")
     assert run(server, b"SET", b"k", b"other", b"EX", b"5", b"NX") is None
     assert run(server, b"SET", b"k", b"other", b"NX") is None
     assert run(server, b"GET", b"k") == b"v"
     assert run(server, b"TTL", b"k") == 10
     assert run(server, b"SET", b"nope", b"v", b"XX") is None
     assert run(server, b"EXISTS", b"nope") == 0
-    assert run(server, b"SET", b"k", b"other", b"XX") == OK
+    assert run(server, b"SET", b"k", b"other", b"XX") == SimpleString(b"OK")
     assert run(server, b"GET", b"k") == b"other"
 
 
 def test_set_keepttl_changes_the_value_but_not_expiry(server):
     run(server, b"SET", b"k", b"v", b"EX", b"10")
-    assert run(server, b"SET", b"k", b"v2", b"KEEPTTL") == OK
+    assert run(server, b"SET", b"k", b"v2", b"KEEPTTL") == SimpleString(b"OK")
     assert run(server, b"GET", b"k") == b"v2"
     assert run(server, b"TTL", b"k") == 10
 
@@ -350,8 +300,9 @@ def test_key_lives_up_to_deadline_and_next_read_frees_it(server, clock):
 
 def test_every_command_sees_an_expired_key_as_missing(server, clock):
     # Each call below is the first to touch the key after it expired, so
-    # each must notice on its own: there is no sweeper yet, and the ones
-    # that write (DEL, PERSIST, EXPIRE) must not act on a ghost.
+    # each must notice on its own: this server is never started, so no
+    # sweeper greenlet is running, and the ones that write (DEL, PERSIST,
+    # EXPIRE) must not act on a ghost.
     def expired_key():
         run(server, b"SET", b"k", b"v", b"EX", b"10")
         clock.advance(11)

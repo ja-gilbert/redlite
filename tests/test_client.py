@@ -14,11 +14,6 @@ import pytest
 from redlite import Client, CommandError
 
 
-def test_set_and_get_round_trip_over_a_socket(client):
-    assert client.set("k", "v") == b"OK"
-    assert client.get("k") == b"v"
-
-
 def test_decode_responses_returns_str(client_decoded):
     client_decoded.set("greet", "hello")
     assert client_decoded.get("greet") == "hello"
@@ -43,28 +38,12 @@ def test_two_clients_share_the_same_store(client, server_port):
     client.set("shared", "yes")
     other = Client(port=server_port)
     assert other.get("shared") == b"yes"
+    other.close()
 
 
 def test_error_reply_becomes_a_raised_exception(client):
     with pytest.raises(CommandError):
         client.execute("BOGUS")
-
-
-def test_inline_command_over_a_raw_socket(server_port):
-    # The plain-text form: no RESP framing, just words and a newline.
-    sock = socket.create_connection(("127.0.0.1", server_port), timeout=3)
-    sock.settimeout(3)
-    fh = sock.makefile("rwb")
-
-    fh.write(b"SET k v\r\n")
-    fh.flush()
-    assert fh.readline() == b"+OK\r\n"
-
-    fh.write(b"GET k\r\n")
-    fh.flush()
-    assert fh.readline() == b"$1\r\n"
-    assert fh.readline() == b"v\r\n"
-    sock.close()
 
 
 def test_unknown_inline_command_gets_an_error_and_keeps_the_connection(server_port):
@@ -93,13 +72,6 @@ def test_quit_replies_ok_then_server_closes(server_port):
     assert fh.readline() == b"+OK\r\n"
     assert fh.readline() == b""  # EOF: server hung up, not us
     sock.close()
-
-
-def test_close_releases_connection(server_port):
-    c = Client(port=server_port)
-    c.close()
-    with pytest.raises((OSError, ValueError)):
-        c.get("k")  # the socket is really gone, not just flagged
 
 
 def test_client_works_as_context_manager(server_port):

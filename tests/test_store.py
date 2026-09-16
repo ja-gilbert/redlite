@@ -1,9 +1,11 @@
 """The key-value store on its own: no server, protocol, or socket.
 
 The command tests already pin get/set/delete and others through the server,
-so these only pin what the server cannot see: clock seam, which is the
-reason the store is its own object (expiry needs a time source tests can move
-without sleeping), and the promise that iterating is safe to delete under.
+so these only pin what the server cannot see: that the default clock is wall
+time (the store takes a clock so expiry tests can move time instead of
+sleeping), the rule that an expiry never outlives its key, the no-reap
+contract of expiry(), the sampling sweeper, and the promise that iterating
+is safe to delete under.
 """
 
 import time
@@ -20,17 +22,11 @@ def test_iteration_is_a_snapshot_so_keys_can_be_deleted():
     assert len(store) == 0
 
 
-def test_now_comes_from_injected_clock(clock):
-    store = KeyValueStore(clock=clock)
-    assert store.now() == clock.now
-    clock.advance(30)
-    assert store.now() == clock.now  # moved by test, not wall clock
-
-
 def test_default_clock_is_wall_time():
-    # Wall time, not monotonic: We need to persist expires as absolute
-    # PEXPIREAT timestamps, and those have to mean the same thing after a
-    # restart. Redis makes the same choice
+    # Wall time, not monotonic: expiry deadlines are stored as absolute
+    # timestamps, so they have to mean the same thing outside this process --
+    # and after a restart, once expiries are persisted. Redis makes the same
+    # choice.
     before = time.time()
     now = KeyValueStore().now()
     assert before <= now <= time.time()

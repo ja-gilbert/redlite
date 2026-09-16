@@ -42,6 +42,11 @@ class Disconnect(Exception):
         self.reply = reply
 
 
+def _read_line(socket_file: BufferedIOBase) -> bytes:
+    """One line, without its trailing CRLF."""
+    return socket_file.readline().rstrip(b"\r\n")
+
+
 class ProtocolHandler:
     def __init__(self) -> None:
         self.handlers: dict[bytes, Callable[[BufferedIOBase], Value]] = {
@@ -58,9 +63,8 @@ class ProtocolHandler:
         if not first_byte:
             raise Disconnect()
 
-        try:
-            handler = self.handlers[first_byte]
-        except KeyError:
+        handler = self.handlers.get(first_byte)
+        if handler is None:
             # Not a RESP type byte, so this is an inline command: a plain text
             # line like b"SET some data\r\n", as sent by telnet or redis-benchmark.
             line = first_byte + socket_file.readline()
@@ -68,35 +72,33 @@ class ProtocolHandler:
         return handler(socket_file)
 
     def handle_simple_string(self, socket_file: BufferedIOBase) -> bytes:
-        return socket_file.readline().rstrip(b"\r\n")
+        return _read_line(socket_file)
 
     def handle_error(self, socket_file: BufferedIOBase) -> Error:
-        return Error(socket_file.readline().rstrip(b"\r\n"))
+        return Error(_read_line(socket_file))
 
     def handle_integer(self, socket_file: BufferedIOBase) -> int:
-        return int(socket_file.readline().rstrip(b"\r\n"))
+        return int(_read_line(socket_file))
 
     def handle_string(self, socket_file: BufferedIOBase) -> bytes | None:
         # First read the length ($<length>\r\n).
-        length = int(socket_file.readline().rstrip(b"\r\n"))
+        length = int(_read_line(socket_file))
         if length == -1:
             return None  # Special-case for NULLs.
-        length += 2  # Include the trailing \r\n in count.
-        return socket_file.read(length)[:-2]
+        return socket_file.read(length + 2)[:-2]  # read past the CRLF, then drop it
 
     def handle_array(self, socket_file: BufferedIOBase) -> list[Value]:
-        num_elements = int(socket_file.readline().rstrip(b"\r\n"))
+        num_elements = int(_read_line(socket_file))
         return [self.handle_request(socket_file) for _ in range(num_elements)]
 
     def handle_dict(self, socket_file: BufferedIOBase) -> dict[Value, Value]:
-        num_items = int(socket_file.readline().rstrip(b"\r\n"))
+        num_items = int(_read_line(socket_file))
         elements = [self.handle_request(socket_file) for _ in range(num_items * 2)]
         return dict(zip(elements[::2], elements[1::2]))
 
     def write_response(self, socket_file: BufferedIOBase, data: Value) -> None:
         buf = BytesIO()
         self._write(buf, data)
-        buf.seek(0)
         socket_file.write(buf.getvalue())
         socket_file.flush()
 
@@ -121,9 +123,9 @@ class ProtocolHandler:
                 self._write(buf, item)
         elif isinstance(data, dict):
             buf.write(b"%%%d\r\n" % len(data))
-            for key in data:
+            for key, value in data.items():
                 self._write(buf, key)
-                self._write(buf, data[key])
+                self._write(buf, value)
         elif data is None:
             buf.write(b"$-1\r\n")
         else:
