@@ -201,6 +201,10 @@ def test_expire_on_a_missing_key_is_zero_and_a_bad_timeout_is_an_error(server):
         CommandError, match=r"^ERR invalid expire time in 'expire' command$"
     ):
         run(server, b"EXPIRE", b"k", b"9223372036854775807")
+    with pytest.raises(
+        CommandError, match=r"^ERR invalid expire time in 'pexpire' command$"
+    ):
+        run(server, b"PEXPIRE", b"k", b"9223372036854775807")
     assert run(server, b"TTL", b"k") == -1  # the bad calls changed nothing
 
 
@@ -223,6 +227,9 @@ def test_set_drops_the_expiry_but_incr_and_append_keep_it(server):
     run(server, b"APPEND", b"n", b"0")
     assert run(server, b"TTL", b"n") == 10
     run(server, b"SET", b"n", b"5")
+    assert run(server, b"TTL", b"n") == -1
+    run(server, b"EXPIRE", b"n", b"10")
+    run(server, b"MSET", b"n", b"6")  # MSET is a fresh write too
     assert run(server, b"TTL", b"n") == -1
 
 
@@ -276,10 +283,17 @@ def test_set_rejects_bad_options_before_writing(server):
         [b"NX", b"XX"],
         [b"EX", b"10", b"PX", b"5"],
         [b"EX", b"10", b"KEEPTTL"],
+        [b"KEEPTTL", b"EX", b"10"],  # in either order
         [b"EX"],
+        [b"EX", b"0", b"BOGUS"],  # syntax is checked before the amount, as Redis does
     ):
         with pytest.raises(CommandError, match=r"^ERR syntax error$"):
             run(server, b"SET", b"k", b"new", *bad)
+    # and the amount is checked before NX/XX gets a chance to refuse the write
+    with pytest.raises(
+        CommandError, match=r"^ERR invalid expire time in 'set' command$"
+    ):
+        run(server, b"SET", b"k", b"new", b"EX", b"9223372036854775807", b"NX")
     assert run(server, b"GET", b"k") == b"old"
     assert run(server, b"TTL", b"k") == -1
 
@@ -314,6 +328,9 @@ def test_every_command_sees_an_expired_key_as_missing(server, clock):
         ((b"GETDEL", b"k"), None),
         ((b"PERSIST", b"k"), 0),
         ((b"EXPIRE", b"k", b"10"), 0),
+        ((b"PTTL", b"k"), -2),
+        ((b"MGET", b"k"), [None]),
+        ((b"APPEND", b"k", b"x"), 1),  # starts from empty, not from the ghost's value
     ]:
         expired_key()
         assert run(server, *command) == reply, command
