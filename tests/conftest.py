@@ -1,9 +1,11 @@
 """Shared fixtures.
 
-The protocol and command tests need no network -- they drive the objects
-directly. Only the client tests need a live server, so the server fixture
-lives here and starts one real gevent server in a subprocess (the same way
-the server actually runs, monkey-patched), on an OS-assigned port.
+The protocol, command and store tests need no network -- they drive the
+objects directly, and move time with the `clock` fixture below rather than
+sleeping. Only the client tests and the redis-py conformance tests need a
+live server, so the server fixture lives here and starts one real gevent
+server in a subprocess (the same way the server actually runs,
+monkey-patched), on an OS-assigned port.
 """
 
 import re
@@ -23,8 +25,8 @@ _SERVER_CMD = [sys.executable, "-m", "redlite", "--port", "0"]
 _LISTENING = re.compile(r"listening on 127\.0\.0\.1:(\d+)")
 
 
-def _wait_until_accepting(port, timeout=5.0):
-    deadline = time.time() + timeout
+def _wait_until_accepting(port):
+    deadline = time.time() + 5.0
     while time.time() < deadline:
         try:
             socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
@@ -39,7 +41,7 @@ def server_port():
     """A live redlite server in a subprocess. Yields its port."""
     proc = subprocess.Popen(
         _SERVER_CMD,
-        stdout=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
     )
@@ -62,6 +64,7 @@ def server_port():
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait()
 
 
 @pytest.fixture
@@ -85,8 +88,8 @@ def client_decoded(server_port):
 class FakeClock:
     """Stands in for time.time(). Tests move it with advance() instead of sleeping."""
 
-    def __init__(self, now=1_700_000_000.0):
-        self.now = now
+    def __init__(self):
+        self.now = 1_700_000_000.0
 
     def __call__(self):
         return self.now

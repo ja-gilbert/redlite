@@ -17,19 +17,17 @@ def r(server_port):
     client.close()
 
 
-def test_redis_py_connects_and_pings(r):
-    assert r.ping() is True
+def test_redis_py_ping_returns_pong(r):
+    assert r.ping() is True  # redis-py checks the reply is exactly PONG
 
 
 def test_redis_py_data_commands_round_trip(r):
-    assert r.set("k", "v") is True  # only True if we replied +OK
+    assert r.set("k", "v") is True  # redis-py checks the reply is exactly OK
     assert r.get("k") == b"v"
     assert r.mset({"a": "1", "b": "2"}) is True
     assert r.mget("a", "b", "missing") == [b"1", b"2", None]
     assert r.delete("k") == 1
     assert r.get("k") is None
-
-
-def test_redis_py_raises_on_server_errors(r):
+    # a server error must reach the real client as ResponseError, not as data
     with pytest.raises(redis.ResponseError):
         r.execute_command("BOGUS")

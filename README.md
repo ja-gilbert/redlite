@@ -5,13 +5,14 @@ and extended from there
 
 It speaks the RESP wire protocol over a gevent TCP server, stores values as
 bytes end-to-end so they're binary-safe, and ships a client that reuses the
-same protocol handler. Compatibility with standard Redis clients is the goal,
-not yet the state - see the roadmap.
+same protocol handler. redis-cli, redis-benchmark and redis-py all talk to it;
+[docs/verification.md](docs/verification.md) records what was checked and
+what is still missing (RESP2 only, no `CONFIG`, `INFO` or `SELECT`).
 
 ## Running
 
 Start the server:
-    
+
     uv run redlite
 
 Then, in another terminal:
@@ -21,7 +22,7 @@ Then, in another terminal:
     >>> from redlite import Client
     >>> c = Client(decode_responses=True)
     >>> c.set('hello', 'world')
-    1
+    'OK'
     >>> c.get('hello')
     'world'
 

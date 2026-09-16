@@ -25,11 +25,11 @@ class Client:
         self._protocol = ProtocolHandler()
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._socket.connect((host, port))
-        self._fh = self._socket.makefile("rwb")
+        self._socket_file = self._socket.makefile("rwb")
         self._decode_responses = decode_responses
 
     def close(self) -> None:
-        self._fh.close()
+        self._socket_file.close()
         self._socket.close()
 
     def __enter__(self) -> Self:
@@ -57,8 +57,8 @@ class Client:
         return self.execute("MSET", *items)
 
     def execute(self, *args: Value) -> Value:
-        self._protocol.write_response(self._fh, args)
-        resp = self._protocol.handle_request(self._fh)
+        self._protocol.write_response(self._socket_file, args)
+        resp = self._protocol.handle_request(self._socket_file)
         if isinstance(resp, Error):
             message = resp.message
             if isinstance(message, bytes):

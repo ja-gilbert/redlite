@@ -1,10 +1,13 @@
 """The RESP codec: bytes on the wire <-> Python objects.
 
 These drive ProtocolHandler directly through a BytesIO, so there's no
-server and no socket. They pin the *promises* of the protocol layer:
-values survive a round trip unchanged (including binary data), the wire
-format matches the RESP spec where a client would notice, and malformed
-input raises rather than returning garbage.
+server and no socket. They are deliberately only what the live client and
+redis-py tests cannot see: RESP shapes redlite never puts on a socket in
+this suite (negative integers, nested arrays, maps), byte-exact framing the
+server's own parser would forgive (the $-1 vs $0 null/empty distinction, a
+str value, an error frame), and an exhausted stream raising Disconnect
+rather than returning garbage. Plain bulk strings, flat arrays, +OK and
+inline commands over a socket belong to the client tests.
 """
 
 from io import BytesIO
@@ -12,7 +15,6 @@ from io import BytesIO
 import pytest
 
 from redlite import Disconnect, Error, ProtocolHandler
-from redlite.protocol import OK
 
 
 @pytest.fixture
@@ -33,16 +35,11 @@ def serialize(proto, obj):
 @pytest.mark.parametrize(
     "value",
     [
-        b"foobar",
-        b"",  # empty bulk string
-        42,
-        -7,
-        None,
-        [b"a", b"b"],
-        [[1], b"hi"],  # nested array
-        {b"k": b"v"},
-        b"a\r\nb",  # embedded CRLF: the whole reason RESP beats readline()
+        -7,  # TTL/PTTL reply -1/-2; no socket test carries a negative int
+        [[1], b"hi"],  # an int inside an array: elements are not all bulk strings
+        {b"k": b"v"},  # RESP map: no redlite command replies with one
     ],
+    ids=["negative-int", "nested-array", "map"],
 )
 def test_value_survives_serialize_then_parse(proto, value):
     assert parse(proto, serialize(proto, value)) == value
@@ -57,7 +54,7 @@ def test_null_and_empty_string_are_distinct_on_the_wire(proto):
     assert parse(proto, b"$0\r\n\r\n") == b""
 
 
-def test_str_is_sent_as_utf8_bulk_string(proto):
+def test_str_is_sent_as_a_bulk_string(proto):
     assert serialize(proto, "hi") == b"$2\r\nhi\r\n"
 
 
@@ -66,13 +63,6 @@ def test_error_is_not_serialized_as_array(proto):
     # as a RESP error (-...) and not fall into the list/tuple branch.
     assert serialize(proto, Error(b"boom")) == b"-boom\r\n"
     assert parse(proto, b"-boom\r\n") == Error(b"boom")
-
-
-def test_simple_string_serializes_with_plus_not_as_array(proto):
-    # SimpleString is a namedtuple, so it *is* a tuple -- same trap as Error.
-    # +OK is a status; $2\r\nOK is a value. redis-cli shows them differently.
-    assert serialize(proto, OK) == b"+OK\r\n"
-    assert parse(proto, b"+OK\r\n") == b"OK"
 
 
 def test_empty_read_raises_disconnect(proto):
