@@ -94,3 +94,33 @@ def test_the_sweeper_frees_expired_keys_nobody_reads(client):
     while client.execute("DBSIZE") != 0 and time.monotonic() < deadline:
         time.sleep(0.02)
     assert client.execute("DBSIZE") == 0
+
+
+@pytest.mark.parametrize(
+    "partial",
+    [
+        b"*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$5\r\nhel",  # RESP: value cut short
+        b"SET k hel",  # inline: line cut before its newline
+    ],
+    ids=["resp", "inline"],
+)
+def test_client_that_drops_mid_command_stores_nothing(client, server_port, partial):
+    with socket.create_connection(("127.0.0.1", server_port), timeout=3) as sock:
+        sock.sendall(partial)
+        sock.shutdown(socket.SHUT_WR)  # the client is gone mid-command
+        # EOF with no reply: the server dropped the command and closed. A
+        # "+OK" here would mean it ran the truncated SET.
+        assert sock.recv(64) == b""
+    assert client.get("k") is None
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [b"*2\r\n$3\r\nGET\r\n$abc\r\n", b"*2\r\n$3\r\nGET\r\n$-3\r\n", b"*x\r\n"],
+    ids=["non-numeric-length", "negative-length", "non-numeric-count"],
+)
+def test_bad_framing_closes_only_that_connection(client, server_port, frame):
+    with socket.create_connection(("127.0.0.1", server_port), timeout=3) as sock:
+        sock.sendall(frame)
+        sock.makefile("rb").read()  # returns only once the server closes it
+    assert client.execute("PING") == b"PONG"  # everyone else is still served
