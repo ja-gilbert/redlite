@@ -28,16 +28,17 @@ installed package:
 |------------|-----------------------------------|----------------------|--------:|-------:|---------:|----------:|
 | 2026-09-15 | 42c13d4, before the simplify pass | 76 tests             |     284 |    223 |       61 |     78.5% |
 | 2026-11-05 | 42c13d4                           | 55 tests from PR #21 |     284 |    223 |       61 |     78.5% |
-| 2026-11-05 | 45972e9, current main             | 55 tests             |     266 |    219 |       47 |     82.3% |
+| 2026-11-05 | 45972e9, main as of 2026-11-05    | 55 tests             |     266 |    219 |       47 |     82.3% |
 
 On this mutant set, the 55-test suite kills exactly the same 223 mutants as the
-76-test suite it replaced. On current main, 18 of the 284 mutants no longer apply,
-because the simplify pass rewrote the code they target. Both 2026-11-05 runs on
-main produced identical survivor sets.
+76-test suite it replaced. On 45972e9, main as of 2026-11-05, 18 of the 284
+mutants no longer apply, because the simplify pass rewrote the code they target.
+Both 2026-11-05 runs on 45972e9 produced identical survivor sets.
 
 Test counts are pytest's collected items. The 55 are 50 test functions, some of
 them parametrized.
 
-Surviving mutants on main, by file: `__main__.py` 15 of 38, `client.py` 11 of 36,
-`server.py` 16 of 96, `store.py` 3 of 54, `protocol.py` 2 of 42. Survivors have
-not been classified as equivalent or not; they are treated as known gaps.
+Surviving mutants on 45972e9, measured 2026-11-05, by file:
+`__main__.py` 15 of 38, `client.py` 11 of 36, `server.py` 16 of 96,
+`store.py` 3 of 54, `protocol.py` 2 of 42. Survivors have not been classified as
+equivalent or not; they are treated as known gaps.

@@ -64,9 +64,9 @@ Requests/sec in each run:
 
 The server is single-threaded Python on a gevent event loop, with no tuning; its
 process had a single OS thread when checked after the third run. Runs vary
-widely, so read the medians rather than any single run. The point of these
-numbers is that the server stays correct under 50 concurrent clients, not that
-it is fast. No redis-server was available on this machine, so there is no
+widely, so read the medians rather than any single run. These numbers measure
+throughput and latency with 50 concurrent connections, not correctness.
+No redis-server was available on this machine, so there is no
 side-by-side comparison with real Redis. `redis-benchmark` warns `Could not
 fetch server CONFIG` because `CONFIG` is not implemented; the run proceeds
 regardless.

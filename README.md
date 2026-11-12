@@ -26,6 +26,17 @@ Then, in another terminal:
     >>> c.get('hello')
     'world'
 
+## Known gaps
+
+- No idle timeout. The server handles at most 64 connections at once, so 64
+  idle clients keep every new client waiting until one of them disconnects.
+- No size limits. A request can declare any value length or array size, and
+  the server tries to read all of it.
+- A malformed length or count, such as `$abc` or `*x`, closes the connection
+  without an error reply. The server logs the error.
+- A value's trailing CRLF isn't checked. Any two bytes in its place are
+  accepted.
+
 ## Roadmap
 - [x] Tests and CI
 - [x] Real Redis command names and replies, verified against redis-cli, redis-benchmark, and redis-py

@@ -68,6 +68,8 @@ class ProtocolHandler:
             # Not a RESP type byte, so this is an inline command: a plain text
             # line like b"SET some data\r\n", as sent by telnet or redis-benchmark.
             line = first_byte + socket_file.readline()
+            if not line.endswith(b"\n"):
+                raise Disconnect()  # the client left mid-line: run nothing
             return line.split()
         return handler(socket_file)
 
@@ -85,7 +87,12 @@ class ProtocolHandler:
         length = int(_read_line(socket_file))
         if length == -1:
             return None  # Special-case for NULLs.
-        return socket_file.read(length + 2)[:-2]  # read past the CRLF, then drop it
+        if length < 0:
+            raise ValueError(f"invalid bulk length: {length}")
+        data = socket_file.read(length + 2)  # the value and its CRLF
+        if len(data) < length + 2:
+            raise Disconnect()  # the client left mid-value: run nothing
+        return data[:-2]
 
     def handle_array(self, socket_file: BufferedIOBase) -> list[Value]:
         num_elements = int(_read_line(socket_file))
